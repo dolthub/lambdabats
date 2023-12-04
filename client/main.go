@@ -79,7 +79,17 @@ type TestFile struct {
 
 type Test struct {
 	Name string
+	Tags []string
 	Runs []TestRun
+}
+
+func (t Test) HasTag(tag string) bool {
+	for _, t := range t.Tags {
+		if tag == t {
+			return true
+		}
+	}
+	return false
 }
 
 type TestRun struct {
@@ -181,6 +191,24 @@ func main() {
 
 	RunTest := func(fi, ti int) {
 		eg.Go(func() error {
+			if files[fi].Tests[ti].HasTag("no_lambda") {
+				bar.Add(1)
+				files[fi].Tests[ti].Runs = append(files[fi].Tests[ti].Runs, TestRun{
+					Response: wire.RunTestResult{
+						Output:`
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites time="0">
+<testsuite name="` + files[fi].Name + `" tests="1" failures="0" errors="0" skipped="1" time="0">
+    <testcase classname="` + files[fi].Name + `" name="` + files[fi].Tests[ti].Name + `" time="0">
+       <skipped></skipped>
+    </testcase>
+</testsuite>
+</testsuites>
+`,
+					},
+				})
+				return nil
+			}
 			filter := EscapeNameForFilter(files[fi].Tests[ti].Name)
 			resp, err := config.Runner.Run(egCtx, wire.RunTestRequest{
 				TestLocation: testLocation,
@@ -291,14 +319,19 @@ func LoadTests(fileSys fs.FS, filename string) ([]Test, error) {
 		return nil, err
 	}
 	defer f.Close()
+	var tags []string
 	var res []Test
 	s := bufio.NewScanner(f)
 	for s.Scan() {
 		line := s.Text()
-		if strings.HasPrefix(line, "@test \"") {
+		if strings.HasPrefix(line, "# bats test_tags=") {
+			line = strings.TrimPrefix(line, "# bats test_tags=")
+			tags = strings.Split(line, " ")
+		} else if strings.HasPrefix(line, "@test \"") {
 			line = strings.TrimPrefix(line, "@test \"")
 			line = strings.TrimRight(line, "\" {")
-			res = append(res, Test{Name: line})
+			res = append(res, Test{Name: line, Tags: tags})
+			tags = nil
 		}
 	}
 	return res, s.Err()

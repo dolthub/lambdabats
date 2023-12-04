@@ -4,7 +4,7 @@
 
 * Change bats-core install from untar+./install.sh to install-an-rpm.
 
-* Install JDK + parquet-cli.
+* DONE Install JDK + parquet-cli.
 
 dnf -y install java-17-amazon-corretto-headless
 JAVA_HOME=/usr/lib/jvm/java-17-amazon-corretto.aarch64/
@@ -20,14 +20,17 @@ PARQUET_RUNTIME_JAR=/opt/parquet-1.12.1/parquet-cli-1.12.1-runtime.jar
 
 * Change client code so it builds up its SharedConfig manully.
 
-* Add a bats test_filter for tests which rely on ptty.
+* DONE Add a bats test_filter for tests which rely on ptty.
 
-* Change client code so that tests that opt out of lambda do not get sent up.
+* DONE Change client code so that tests that opt out of lambda do not get requested.
 
 * Change client code so that tests which opt out of lambda get run locally.
 
 * Change client code so that it can output TAP format.
 
 * DoltBatsRunner role in corp.
+
+  - Can upload to our tests directory.
+  - Can Invoke out tests function.
 
 * DoltBatsRunner assumable by DoltHubDeveloper in SSO.

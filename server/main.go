@@ -18,6 +18,10 @@ import (
 	"github.com/reltuk/lambda-play/wire"
 )
 
+func NewTestDownloader() (Downloader, error) {
+	return &CopyingDownloader{}, nil
+}
+
 func handleRequest(ctx context.Context, request events.LambdaFunctionURLRequest) (events.LambdaFunctionURLResponse, error) {
 	var testReq wire.RunTestRequest
 	err := json.Unmarshal([]byte(request.Body), &testReq)
@@ -34,12 +38,40 @@ func handleRequest(ctx context.Context, request events.LambdaFunctionURLRequest)
 		return events.LambdaFunctionURLResponse{Body: "must supply test_name", StatusCode: 400}, nil
 	}
 
-	runLocation, err := UnpackTest(ctx, &CopyingDownloader{}, testReq.TestLocation)
+	downloader, err := NewTestDownloader()
+	if _, ok := os.LookupEnv("USE_LOCAL_DOWNLOADER"); !ok {
+		downloader, err = NewS3Downloader(ctx, "dolt-cloud-test-run-artifacts")
+	}
+	if err != nil {
+		return events.LambdaFunctionURLResponse{}, err
+	}
+
+	runLocation, err := UnpackTest(ctx, downloader, testReq.TestLocation)
 	if err != nil {
 		return events.LambdaFunctionURLResponse{}, err
 	}
 
 	var res wire.RunTestResult
+
+	batsTempDir := filepath.Join(os.TempDir(), "bats_test_tmpdir")
+	err = os.RemoveAll(batsTempDir)
+	if err != nil {
+		return events.LambdaFunctionURLResponse{}, err
+	}
+	err = os.MkdirAll(batsTempDir, 0777)
+	if err != nil {
+		return events.LambdaFunctionURLResponse{}, err
+	}
+
+	homeTempDir := filepath.Join(os.TempDir(), "bats_test_home")
+	err = os.RemoveAll(homeTempDir)
+	if err != nil {
+		return events.LambdaFunctionURLResponse{}, err
+	}
+	err = os.MkdirAll(homeTempDir, 0777)
+	if err != nil {
+		return events.LambdaFunctionURLResponse{}, err
+	}
 
 	cmd := exec.Command("bats")
 	if cmd.Err != nil {
@@ -48,6 +80,8 @@ func handleRequest(ctx context.Context, request events.LambdaFunctionURLRequest)
 	cmd.Dir = filepath.Join(runLocation, "bats")
 	cmd.Env = os.Environ()
 	cmd.Env = append(cmd.Env, "PATH="+filepath.Join(runLocation, "bin")+":"+os.Getenv("PATH"))
+	cmd.Env = append(cmd.Env, "TMPDIR="+batsTempDir)
+	cmd.Env = append(cmd.Env, "HOME="+homeTempDir)
 	cmd.Args = []string{
 		"bats", "-F", "junit", "-f", testReq.TestName, testReq.FileName,
 	}
@@ -69,15 +103,15 @@ type Downloader interface {
 	Download(ctx context.Context, dest, name string) error
 }
 
-func NewS3Downloader(ctx context.Context, bucket string) *S3Downloader {
+func NewS3Downloader(ctx context.Context, bucket string) (*S3Downloader, error) {
 	cfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 	return &S3Downloader{
 		s3client: s3.NewFromConfig(cfg),
 		bucket:   bucket,
-	}
+	}, nil
 }
 
 type S3Downloader struct {
@@ -135,7 +169,7 @@ func UnpackTest(ctx context.Context, downloader Downloader, test string) (string
 	}
 
 	// If the setinel path doesn't exist, we create it.
-	err = os.RemoveAll(destDir)
+	err = os.RemoveAll(testDir)
 	if err != nil {
 		return "", err
 	}

@@ -19,6 +19,10 @@ import (
 	"time"
 
 	"github.com/aws/aws-lambda-go/events"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/lambda"
 	"github.com/fatih/color"
 	"github.com/google/uuid"
 	"github.com/schollz/progressbar/v3"
@@ -27,9 +31,13 @@ import (
 	"github.com/reltuk/lambda-play/wire"
 )
 
+const S3BucketName = "dolt-cloud-test-run-artifacts"
+const LambdaFunctionName = "dolt_bats_test_runner"
+
 type RunConfig struct {
 	Concurrency int
 	Uploader    Uploader
+	Runner      Runner
 }
 
 func NewTestRunConfig() RunConfig {
@@ -44,7 +52,24 @@ func NewTestRunConfig() RunConfig {
 	return RunConfig{
 		Concurrency: 1,
 		Uploader:    uploader,
+		Runner:      NewLambdaEmulatorRunner(),
 	}
+}
+
+func NewAWSRunConfig(ctx context.Context) (RunConfig, error) {
+	uploader, err := NewS3Uploader(ctx, S3BucketName)
+	if err != nil {
+		return RunConfig{}, err
+	}
+	runner, err := NewLambdaInvokeRunner(ctx, LambdaFunctionName)
+	if err != nil {
+		return RunConfig{}, err
+	}
+	return RunConfig{
+		Concurrency: 512,
+		Uploader:    uploader,
+		Runner:      runner,
+	}, nil
 }
 
 type TestFile struct {
@@ -74,10 +99,11 @@ type TestRunResult struct {
 	Output string
 }
 
-func (tr TestRun) Result() (TestRunResult, error) {
+func (tr TestRun) Result(name string) (TestRunResult, error) {
 	type Skipped struct {
 	}
 	type TestCase struct {
+		Name    string   `xml:"name,attr"`
 		Skipped *Skipped `xml:"skipped"`
 		Failure *string  `xml:"failure"`
 	}
@@ -89,7 +115,7 @@ func (tr TestRun) Result() (TestRunResult, error) {
 		TestSuites []TestSuite `xml:"testsuite"`
 	}
 
-	if tr.Response.Err != "" {
+	if tr.Response.Err != "" && tr.Response.Err != "exit status 1" {
 		return TestRunResult{}, errors.New(tr.Response.Err)
 	}
 
@@ -101,10 +127,16 @@ func (tr TestRun) Result() (TestRunResult, error) {
 	if len(unmarshaled.TestSuites) != 1 {
 		return TestRunResult{}, errors.New("expected one testsuites element")
 	}
-	if len(unmarshaled.TestSuites[0].TestCases) != 1 {
-		return TestRunResult{}, errors.New("expected one testcases element")
+	var tc *TestCase
+	for _, v := range unmarshaled.TestSuites[0].TestCases {
+		if v.Name == name {
+			tc = &v
+			break
+		}
 	}
-	tc := unmarshaled.TestSuites[0].TestCases[0]
+	if tc == nil {
+		return TestRunResult{}, fmt.Errorf("expected to find a testcase element with name \"%s\"", name)
+	}
 	if tc.Skipped != nil {
 		return TestRunResult{Status: TestRunResultStatus_Skipped}, nil
 	}
@@ -125,6 +157,14 @@ func main() {
 	ctx := context.Background()
 
 	config := NewTestRunConfig()
+	if _, ok := os.LookupEnv("RUN_AGAINST_LAMBDA"); ok {
+		var err error
+		config, err = NewAWSRunConfig(ctx)
+		if err != nil {
+			panic(err)
+		}
+	}
+
 	testLocation, err := UploadTests(ctx, config.Uploader, doltSrcDir)
 	if err != nil {
 		panic(err)
@@ -139,13 +179,13 @@ func main() {
 	eg.SetLimit(config.Concurrency)
 	bar := progressbar.Default(int64(total), "running tests")
 
-	runner := NewLambdaEmulatorRunner()
 	RunTest := func(fi, ti int) {
 		eg.Go(func() error {
-			resp, err := runner.Run(egCtx, wire.RunTestRequest{
+			filter := EscapeNameForFilter(files[fi].Tests[ti].Name)
+			resp, err := config.Runner.Run(egCtx, wire.RunTestRequest{
 				TestLocation: testLocation,
 				FileName:     files[fi].Name,
-				TestName:     files[fi].Tests[ti].Name,
+				TestName:     filter,
 			})
 			if err != nil {
 				return err
@@ -178,13 +218,22 @@ func main() {
 	numTests := 0
 	numSkipped := 0
 	numFailed := 0
+	numFatal := 0
 	for _, f := range files {
 		blue.Println(f.Name)
 		for _, t := range f.Tests {
 			numTests += 1
-			res, err := t.Runs[0].Result()
+			res, err := t.Runs[0].Result(t.Name)
 			if err != nil {
-				panic(err)
+				numFatal += 1
+				red.Printf("  ✗ %s\n", t.Name)
+				for _, line := range strings.Split(t.Runs[0].Response.Err, "\n") {
+					red.Printf("  %s\n", line)
+				}
+				for _, line := range strings.Split(t.Runs[0].Response.Output, "\n") {
+					red.Printf("  %s\n", line)
+				}
+				continue
 			}
 			if res.Status == TestRunResultStatus_Success {
 				fmt.Printf("  ✓ %s\n", t.Name)
@@ -201,7 +250,9 @@ func main() {
 		}
 		fmt.Println()
 	}
-	if numFailed > 0 {
+	if numFatal > 0 {
+		red.Printf("%d tests, %d fatal, %d failures, %d skipped\n", numTests, numFatal, numFailed, numSkipped)
+	} else if numFailed > 0 {
 		red.Printf("%d tests, %d failures, %d skipped\n", numTests, numFailed, numSkipped)
 	} else {
 		fmt.Printf("%d tests, %d failures, %d skipped\n", numTests, numFailed, numSkipped)
@@ -218,7 +269,7 @@ func LoadTestFiles(dir string) ([]TestFile, int, error) {
 	numTests := 0
 	var files []TestFile
 	for _, e := range entries {
-		if strings.HasSuffix(e.Name(), ".bats") && (e.Name() == "ls.bats" || e.Name() == "sql-server-remotesrv.bats") {
+		if strings.HasSuffix(e.Name(), ".bats") {
 			files = append(files, TestFile{Name: e.Name()})
 		}
 	}
@@ -356,6 +407,38 @@ func (c *CopyingUploader) Upload(ctx context.Context, testsPath string) error {
 	return err
 }
 
+func NewS3Uploader(ctx context.Context, bucket string) (*S3Uploader, error) {
+	cfg, err := config.LoadDefaultConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &S3Uploader{
+		s3client: s3.NewFromConfig(cfg),
+		bucket:   bucket,
+	}, nil
+}
+
+type S3Uploader struct {
+	s3client *s3.Client
+	bucket   string
+}
+
+func (d *S3Uploader) Upload(ctx context.Context, path string) error {
+	srcF, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer srcF.Close()
+	key := aws.String(filepath.Base(strings.TrimSuffix(path, ".tar")))
+	bucket := aws.String(d.bucket)
+	_, err = d.s3client.PutObject(ctx, &s3.PutObjectInput{
+		Key:    key,
+		Bucket: bucket,
+		Body:   srcF,
+	})
+	return err
+}
+
 func UploadTests(ctx context.Context, uploader Uploader, doltSrcDir string) (string, error) {
 	testsTar, err := BuildTestsFile(doltSrcDir)
 	if err != nil {
@@ -406,16 +489,7 @@ func NewLambdaEmulatorRunner() *LambdaEmulatorRunner {
 
 func (e *LambdaEmulatorRunner) Run(ctx context.Context, req wire.RunTestRequest) (wire.RunTestResult, error) {
 	var res wire.RunTestResult
-	bodyBytes, err := json.Marshal(req)
-	if err != nil {
-		return res, err
-	}
-	lambdaReq := events.LambdaFunctionURLRequest{
-		Version: "2.0",
-		RawPath: "/",
-		Body:    string(bodyBytes),
-	}
-	bodyBytes, err = json.Marshal(lambdaReq)
+	bodyBytes, err := ToLambdaFunctionURLHTTPRequestBytes(req)
 	if err != nil {
 		return res, err
 	}
@@ -436,17 +510,74 @@ func (e *LambdaEmulatorRunner) Run(ctx context.Context, req wire.RunTestRequest)
 	if err != nil {
 		return res, err
 	}
+	return FromLambdaFunctionURLHTTPReResponseBytes(bodyBytes)
+}
+
+// A runner which calls Invoke on a Lambda function with a FunctionURL event payload.
+type LambdaInvokeRunner struct {
+	function string
+	client   *lambda.Client
+}
+
+var _ Runner = (*LambdaInvokeRunner)(nil)
+
+func NewLambdaInvokeRunner(ctx context.Context, function string) (*LambdaInvokeRunner, error) {
+	cfg, err := config.LoadDefaultConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &LambdaInvokeRunner{
+		function: function,
+		client:   lambda.NewFromConfig(cfg),
+	}, nil
+}
+
+func (e *LambdaInvokeRunner) Run(ctx context.Context, req wire.RunTestRequest) (wire.RunTestResult, error) {
+	var res wire.RunTestResult
+	bodyBytes, err := ToLambdaFunctionURLHTTPRequestBytes(req)
+	if err != nil {
+		return res, err
+	}
+	resp, err := e.client.Invoke(ctx, &lambda.InvokeInput{
+		FunctionName: aws.String(e.function),
+		Payload:      bodyBytes,
+	})
+	if err != nil {
+		return res, err
+	}
+	return FromLambdaFunctionURLHTTPReResponseBytes(resp.Payload)
+}
+
+func ToLambdaFunctionURLHTTPRequestBytes(req wire.RunTestRequest) ([]byte, error) {
+	bodyBytes, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+	lambdaReq := events.LambdaFunctionURLRequest{
+		Version: "2.0",
+		RawPath: "/",
+		Body:    string(bodyBytes),
+	}
+	return json.Marshal(lambdaReq)
+}
+
+func FromLambdaFunctionURLHTTPReResponseBytes(bs []byte) (wire.RunTestResult, error) {
+	var res wire.RunTestResult
 	var lambdaResp events.LambdaFunctionURLResponse
-	err = json.Unmarshal(bodyBytes, &lambdaResp)
+	err := json.Unmarshal(bs, &lambdaResp)
 	if err != nil {
 		return res, err
 	}
 	if lambdaResp.StatusCode != 200 {
-		return res, fmt.Errorf("non-200 status code in lambda response: code: %d, body: %s", lambdaResp.StatusCode, lambdaResp.Body)
+		res.Err = fmt.Sprintf("non-200 status code in lambda response: code: %d, body: %s", lambdaResp.StatusCode, string(bs))
+		return res, nil
 	}
 	err = json.Unmarshal([]byte(lambdaResp.Body), &res)
-	if err != nil {
-		return res, err
-	}
-	return res, nil
+	return res, err
+}
+
+func EscapeNameForFilter(n string) string {
+	escaped := strings.ReplaceAll(n, "(", "\\(")
+	escaped = strings.ReplaceAll(escaped, "+", "\\+")
+	return "^" + escaped + "$"
 }

@@ -1,0 +1,33 @@
+* Build bash from the Amazon Linux 2023 bash srcrpm, not from GNU download of the bash tarball.
+
+* Change bash install from copy-a-binary to install-an-rpm.
+
+* Change bats-core install from untar+./install.sh to install-an-rpm.
+
+* Install JDK + parquet-cli.
+
+dnf -y install java-17-amazon-corretto-headless
+JAVA_HOME=/usr/lib/jvm/java-17-amazon-corretto.aarch64/
+https://downloads.apache.org/hadoop/common/hadoop-3.3.4/hadoop-3.3.4.tar.gz
+tar zxvf hadoop-3.3.4.tar.gz -C /opt/
+PATH=/opt/hadoop-3.3.4/bin:$PATH
+mkdir /opt/parquet-1.12.1
+cd /opt/parquet-1.12.1
+curl -OL https://repo1.maven.org/maven2/org/apache/parquet/parquet-cli/1.12.1/parquet-cli-1.12.1-runtime.jar
+PARQUET_RUNTIME_JAR=/opt/parquet-1.12.1/parquet-cli-1.12.1-runtime.jar
+
+* Change client code so that it prints progress around building dolt, building remotesrv, uploading test bundle.
+
+* Change client code so it builds up its SharedConfig manully.
+
+* Add a bats test_filter for tests which rely on ptty.
+
+* Change client code so that tests that opt out of lambda do not get sent up.
+
+* Change client code so that tests which opt out of lambda get run locally.
+
+* Change client code so that it can output TAP format.
+
+* DoltBatsRunner role in corp.
+
+* DoltBatsRunner assumable by DoltHubDeveloper in SSO.

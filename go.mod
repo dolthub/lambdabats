@@ -6,6 +6,7 @@ require (
 	github.com/aws/aws-lambda-go v1.41.0
 	github.com/aws/aws-sdk-go-v2 v1.23.5
 	github.com/aws/aws-sdk-go-v2/config v1.25.11
+	github.com/aws/aws-sdk-go-v2/feature/s3/manager v1.15.4
 	github.com/aws/aws-sdk-go-v2/service/lambda v1.49.2
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.47.2
 	github.com/fatih/color v1.16.0

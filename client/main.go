@@ -21,8 +21,9 @@ import (
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/lambda"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/fatih/color"
 	"github.com/google/uuid"
 	"github.com/schollz/progressbar/v3"
@@ -195,7 +196,7 @@ func main() {
 				bar.Add(1)
 				files[fi].Tests[ti].Runs = append(files[fi].Tests[ti].Runs, TestRun{
 					Response: wire.RunTestResult{
-						Output:`
+						Output: `
 <?xml version="1.0" encoding="UTF-8"?>
 <testsuites time="0">
 <testsuite name="` + files[fi].Name + `" tests="1" failures="0" errors="0" skipped="1" time="0">
@@ -337,40 +338,87 @@ func LoadTests(fileSys fs.FS, filename string) ([]Test, error) {
 	return res, s.Err()
 }
 
+func RunWithSpinner(message string, work func() error) error {
+	done := make(chan struct{})
+	var eg errgroup.Group
+	eg.Go(func() error {
+		defer close(done)
+		return work()
+	})
+	eg.Go(func() error {
+		i := 0
+		spinner := []byte{'|', '/', '-', '\\'}
+		fmt.Printf("%s %c", message, spinner[i])
+		for {
+			select {
+			case <-done:
+				fmt.Printf("\bdone\n")
+				return nil
+			case <-time.After(100 * time.Millisecond):
+				i += 1
+				if i == len(spinner) {
+					i = 0
+				}
+				fmt.Printf("\b%c", spinner[i])
+			}
+		}
+		return nil
+	})
+	return eg.Wait()
+}
+
 func BuildTestsFile(doltSrcDir string) (string, error) {
 	doltBinFilePath := filepath.Join(os.TempDir(), uuid.New().String())
-	compileDolt := exec.Command("go")
-	compileDolt.Args = []string{
-		"go", "build", "-o", doltBinFilePath, "./cmd/dolt",
-	}
-	compileDolt.Dir = filepath.Join(doltSrcDir, "go")
-	compileDolt.Env = append(os.Environ(), "GOOS=linux", "GOARCH=arm64")
-	out, err := compileDolt.CombinedOutput()
+	err := RunWithSpinner("building dolt...", func() error {
+		compileDolt := exec.Command("go")
+		compileDolt.Args = []string{
+			"go", "build", "-o", doltBinFilePath, "./cmd/dolt",
+		}
+		compileDolt.Dir = filepath.Join(doltSrcDir, "go")
+		compileDolt.Env = append(os.Environ(), "GOOS=linux", "GOARCH=arm64")
+		out, err := compileDolt.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("error running go build dolt: %w\n%s", err, string(out))
+		}
+		return nil
+	})
 	if err != nil {
-		return "", fmt.Errorf("error running go build dolt: %w\n%s", err, string(out))
+		return "", err
 	}
 
 	remotesrvBinFilePath := filepath.Join(os.TempDir(), uuid.New().String())
-	compileRemotesrv := exec.Command("go")
-	compileRemotesrv.Args = []string{
-		"go", "build", "-o", remotesrvBinFilePath, "./utils/remotesrv",
-	}
-	compileRemotesrv.Dir = filepath.Join(doltSrcDir, "go")
-	compileRemotesrv.Env = append(os.Environ(), "GOOS=linux", "GOARCH=arm64")
-	err = compileRemotesrv.Run()
+	err = RunWithSpinner("building remotesrv...", func() error {
+		compileRemotesrv := exec.Command("go")
+		compileRemotesrv.Args = []string{
+			"go", "build", "-o", remotesrvBinFilePath, "./utils/remotesrv",
+		}
+		compileRemotesrv.Dir = filepath.Join(doltSrcDir, "go")
+		compileRemotesrv.Env = append(os.Environ(), "GOOS=linux", "GOARCH=arm64")
+		err = compileRemotesrv.Run()
+		if err != nil {
+			return fmt.Errorf("error building remotesrv: %w", err)
+		}
+		return nil
+	})
 	if err != nil {
-		return "", fmt.Errorf("error building remotesrv: %w", err)
+		return "", err
 	}
 
 	batsTarFilePath := filepath.Join(os.TempDir(), uuid.New().String())
-	tarBatsFiles := exec.Command("tar")
-	tarBatsFiles.Args = []string{
-		"tar", "cf", batsTarFilePath, "-C", "integration-tests", "bats",
-	}
-	tarBatsFiles.Dir = doltSrcDir
-	err = tarBatsFiles.Run()
+	err = RunWithSpinner("building bats.tar...", func() error {
+		tarBatsFiles := exec.Command("tar")
+		tarBatsFiles.Args = []string{
+			"tar", "cf", batsTarFilePath, "-C", "integration-tests", "bats",
+		}
+		tarBatsFiles.Dir = doltSrcDir
+		err = tarBatsFiles.Run()
+		if err != nil {
+			return fmt.Errorf("error taring up bats tests: %w", err)
+		}
+		return nil
+	})
 	if err != nil {
-		return "", fmt.Errorf("error taring up bats tests: %w", err)
+		return "", err
 	}
 
 	testsTarPath := filepath.Join(os.TempDir(), uuid.New().String()+".tar")
@@ -462,14 +510,52 @@ func (d *S3Uploader) Upload(ctx context.Context, path string) error {
 		return err
 	}
 	defer srcF.Close()
+	fi, err := srcF.Stat()
+	if err != nil {
+		return err
+	}
+	bar := progressbar.DefaultBytes(fi.Size(), "uploading tests to s3")
+	rd := NewProgressBarReader(srcF, bar)
 	key := aws.String(filepath.Base(strings.TrimSuffix(path, ".tar")))
 	bucket := aws.String(d.bucket)
-	_, err = d.s3client.PutObject(ctx, &s3.PutObjectInput{
-		Key:    key,
-		Bucket: bucket,
-		Body:   srcF,
+	uploader := manager.NewUploader(d.s3client)
+	_, err = uploader.Upload(ctx, &s3.PutObjectInput{
+		Key:           key,
+		Bucket:        bucket,
+		Body:          rd,
+		ContentLength: aws.Int64(fi.Size()),
 	})
 	return err
+}
+
+type ProgressBarReader struct {
+	f   *os.File
+	bar *progressbar.ProgressBar
+}
+
+func NewProgressBarReader(f *os.File, bar *progressbar.ProgressBar) *ProgressBarReader {
+	return &ProgressBarReader{f, bar}
+}
+
+func (r *ProgressBarReader) Read(p []byte) (n int, err error) {
+	n, err = r.f.Read(p)
+	r.bar.Add(n)
+	return
+}
+
+func (r *ProgressBarReader) ReadAt(p []byte, off int64) (n int, err error) {
+	n, err = r.f.ReadAt(p, off)
+	r.bar.Add(n)
+	return
+}
+
+func (r *ProgressBarReader) Seek(offset int64, whence int) (int64, error) {
+	return r.f.Seek(offset, whence)
+}
+
+func (r *ProgressBarReader) Close() error {
+	r.bar.Finish()
+	return r.f.Close()
 }
 
 func UploadTests(ctx context.Context, uploader Uploader, doltSrcDir string) (string, error) {

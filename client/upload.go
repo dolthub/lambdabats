@@ -17,6 +17,8 @@ package main
 import (
 	"archive/tar"
 	"context"
+	"crypto/sha256"
+	"encoding/base32"
 	"fmt"
 	"io"
 	"io/fs"
@@ -31,9 +33,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/google/uuid"
 	"github.com/schollz/progressbar/v3"
+	"golang.org/x/sync/errgroup"
 )
 
-func BuildTestsFile(doltSrcDir string) (string, error) {
+func BuildTestsFile(doltSrcDir string) (UploadArtifacts, error) {
 	binDir := filepath.Join(os.TempDir(), uuid.New().String())
 	defer os.RemoveAll(binDir)
 
@@ -52,7 +55,7 @@ func BuildTestsFile(doltSrcDir string) (string, error) {
 		return nil
 	})
 	if err != nil {
-		return "", err
+		return UploadArtifacts{}, err
 	}
 
 	remotesrvBinFilePath := filepath.Join(binDir, "remotesrv")
@@ -70,7 +73,7 @@ func BuildTestsFile(doltSrcDir string) (string, error) {
 		return nil
 	})
 	if err != nil {
-		return "", err
+		return UploadArtifacts{}, err
 	}
 
 	batsTarFilePath := filepath.Join(os.TempDir(), uuid.New().String())
@@ -113,46 +116,134 @@ func BuildTestsFile(doltSrcDir string) (string, error) {
 		return nil
 	})
 	if err != nil {
-		return "", err
+		return UploadArtifacts{}, err
 	}
 
-	testsTarPath := filepath.Join(os.TempDir(), uuid.New().String()+".tar")
-	f, err := os.Create(testsTarPath)
+	doltHash := sha256.New()
+	f, err := os.Open(doltBinFilePath)
 	if err != nil {
-		return "", err
+		return UploadArtifacts{}, err
 	}
-	defer f.Close()
-	w := tar.NewWriter(f)
-	defer w.Close()
+	_, err = io.Copy(doltHash, f)
+	f.Close()
+	if err != nil {
+		return UploadArtifacts{}, err
+	}
+	doltHashStr := base32.HexEncoding.EncodeToString(doltHash.Sum(nil))
 
-	err = w.WriteHeader(&tar.Header{
-		Name: "bin/",
-		Mode: 0777,
-	})
+	doltTarPath := filepath.Join(os.TempDir(), doltHashStr+".tar")
+	err = func() error {
+		f, err := os.Create(doltTarPath)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		w := tar.NewWriter(f)
+		defer w.Close()
+		err = w.WriteHeader(&tar.Header{
+			Name: "bin/",
+			Mode: 0777,
+		})
+		err = WriteFileToTar(w, &tar.Header{
+			Name: "bin/dolt",
+			Mode: 0777,
+		}, doltBinFilePath)
+		if err != nil {
+			panic(err)
+			return err
+		}
+		return nil
+	}()
+	if err != nil {
+		return UploadArtifacts{}, err
+	}
 
-	err = WriteFileToTar(w, &tar.Header{
-		Name: "bin/dolt",
-		Mode: 0777,
-	}, doltBinFilePath)
+	binHash := sha256.New()
+	f, err = os.Open(remotesrvBinFilePath)
 	if err != nil {
-		return "", err
+		return UploadArtifacts{}, err
 	}
-	err = WriteFileToTar(w, &tar.Header{
-		Name: "bin/remotesrv",
-		Mode: 0777,
-	}, remotesrvBinFilePath)
+	_, err = io.Copy(binHash, f)
+	f.Close()
 	if err != nil {
-		return "", err
+		return UploadArtifacts{}, err
 	}
-	err = WriteFileToTar(w, &tar.Header{
-		Name: "bats.tar",
-		Mode: 0666,
-	}, batsTarFilePath)
+	binHashStr := base32.HexEncoding.EncodeToString(binHash.Sum(nil))
+
+	binTarPath := filepath.Join(os.TempDir(), binHashStr+".tar")
+	err = func() error {
+		f, err := os.Create(binTarPath)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		w := tar.NewWriter(f)
+		defer w.Close()
+		err = w.WriteHeader(&tar.Header{
+			Name: "bin/",
+			Mode: 0777,
+		})
+		err = WriteFileToTar(w, &tar.Header{
+			Name: "bin/remotesrv",
+			Mode: 0777,
+		}, remotesrvBinFilePath)
+		if err != nil {
+			panic(err)
+			return err
+		}
+		return nil
+	}()
 	if err != nil {
-		return "", err
+		return UploadArtifacts{}, err
 	}
 
-	return testsTarPath, nil
+	batsHash := sha256.New()
+	f, err = os.Open(batsTarFilePath)
+	if err != nil {
+		return UploadArtifacts{}, err
+	}
+	_, err = io.Copy(batsHash, f)
+	f.Close()
+	if err != nil {
+		return UploadArtifacts{}, err
+	}
+	batsHashStr := base32.HexEncoding.EncodeToString(batsHash.Sum(nil))
+
+	batsTarPath := filepath.Join(os.TempDir(), batsHashStr+".tar")
+	err = func() error {
+		f, err := os.Create(batsTarPath)
+		if err != nil {
+			panic(err)
+			return err
+		}
+		defer f.Close()
+		src, err := os.Open(batsTarFilePath)
+		if err != nil {
+			panic(err)
+			return err
+		}
+		defer src.Close()
+		_, err = io.Copy(f, src)
+		return err
+	}()
+
+	return UploadArtifacts{
+		DoltTarPath:  doltTarPath,
+		BinTarPath:   binTarPath,
+		TestsTarPath: batsTarPath,
+	}, nil
+}
+
+type UploadArtifacts struct {
+	DoltTarPath  string
+	BinTarPath   string
+	TestsTarPath string
+}
+
+type UploadLocations struct {
+	DoltPath  string
+	BinPath   string
+	TestsPath string
 }
 
 func WriteFileToTar(w *tar.Writer, header *tar.Header, path string) error {
@@ -177,45 +268,56 @@ func WriteFileToTar(w *tar.Writer, header *tar.Header, path string) error {
 	return err
 }
 
-func UploadTests(ctx context.Context, uploader Uploader, doltSrcDir string) (string, error) {
-	testsTar, err := BuildTestsFile(doltSrcDir)
+func UploadTests(ctx context.Context, uploader Uploader, doltSrcDir string) (UploadLocations, error) {
+	artifacts, err := BuildTestsFile(doltSrcDir)
 	if err != nil {
-		return "", err
+		return UploadLocations{}, err
 	}
-	defer os.RemoveAll(testsTar)
-	err = uploader.Upload(ctx, testsTar)
+	defer os.RemoveAll(artifacts.DoltTarPath)
+	defer os.RemoveAll(artifacts.BinTarPath)
+	defer os.RemoveAll(artifacts.TestsTarPath)
+	err = uploader.Upload(ctx, artifacts)
 	if err != nil {
-		return "", err
+		return UploadLocations{}, err
 	}
-	return filepath.Base(strings.TrimSuffix(testsTar, ".tar")), nil
+	return UploadLocations{
+		DoltPath:  filepath.Base(strings.TrimSuffix(artifacts.DoltTarPath, ".tar")),
+		BinPath:   filepath.Base(strings.TrimSuffix(artifacts.BinTarPath, ".tar")),
+		TestsPath: filepath.Base(strings.TrimSuffix(artifacts.TestsTarPath, ".tar")),
+	}, nil
 }
 
 type Uploader interface {
-	Upload(ctx context.Context, path string) error
+	Upload(ctx context.Context, artifacts UploadArtifacts) error
 }
 
 type CopyingUploader struct {
 	dir string
 }
 
-func (c *CopyingUploader) Upload(ctx context.Context, testsPath string) error {
-	destPath := filepath.Join(c.dir, filepath.Base(testsPath))
-	src, err := os.Open(testsPath)
-	if err != nil {
-		return err
+func (c *CopyingUploader) Upload(ctx context.Context, artifacts UploadArtifacts) error {
+	for _, path := range []string{artifacts.DoltTarPath, artifacts.BinTarPath, artifacts.TestsTarPath} {
+		destPath := filepath.Join(c.dir, filepath.Base(path))
+		src, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer src.Close()
+		dest, err := os.Create(destPath)
+		defer dest.Close()
+		if err != nil {
+			return err
+		}
+		_, err = io.Copy(dest, src)
+		if err != nil {
+			return err
+		}
 	}
-	defer src.Close()
-	dest, err := os.Create(destPath)
-	defer dest.Close()
-	if err != nil {
-		return err
-	}
-	_, err = io.Copy(dest, src)
 
 	// Sleep here to deal with macOS FUSE nonsense?
 	time.Sleep(1 * time.Second)
 
-	return err
+	return nil
 }
 
 type S3Uploader struct {
@@ -230,26 +332,126 @@ func NewS3Uploader(ctx context.Context, cfg aws.Config, bucket string) (*S3Uploa
 	}, nil
 }
 
-func (d *S3Uploader) Upload(ctx context.Context, path string) error {
-	srcF, err := os.Open(path)
+func (d *S3Uploader) Upload(ctx context.Context, artifacts UploadArtifacts) error {
+	doltF, err := os.Open(artifacts.DoltTarPath)
 	if err != nil {
+		panic(err)
 		return err
 	}
-	defer srcF.Close()
-	fi, err := srcF.Stat()
+	defer doltF.Close()
+	fi, err := doltF.Stat()
 	if err != nil {
+		panic(err)
 		return err
 	}
-	bar := progressbar.DefaultBytes(fi.Size(), "uploading tests to s3")
-	rd := NewProgressBarReader(srcF, bar)
-	key := aws.String(filepath.Base(strings.TrimSuffix(path, ".tar")))
-	bucket := aws.String(d.bucket)
+	doltSize := fi.Size()
+
+	binF, err := os.Open(artifacts.BinTarPath)
+	if err != nil {
+		panic(err)
+		return err
+	}
+	defer binF.Close()
+	fi, err = binF.Stat()
+	if err != nil {
+		panic(err)
+		return err
+	}
+	binSize := fi.Size()
+
+	testsF, err := os.Open(artifacts.TestsTarPath)
+	if err != nil {
+		panic(err)
+		return err
+	}
+	defer testsF.Close()
+	fi, err = testsF.Stat()
+	if err != nil {
+		panic(err)
+		return err
+	}
+	testsSize := fi.Size()
+
+	fmt.Println(artifacts.DoltTarPath)
+	fmt.Println(artifacts.BinTarPath)
+	fmt.Println(artifacts.TestsTarPath)
+
+	size := doltSize + binSize + testsSize
+
+	bar := progressbar.DefaultBytes(size, "uploading tests to s3")
+
 	uploader := manager.NewUploader(d.s3client)
-	_, err = uploader.Upload(ctx, &s3.PutObjectInput{
-		Key:           key,
-		Bucket:        bucket,
-		Body:          rd,
-		ContentLength: aws.Int64(fi.Size()),
+
+	eg, egCtx := errgroup.WithContext(ctx)
+	eg.Go(func() error {
+		key := aws.String(filepath.Base(strings.TrimSuffix(artifacts.DoltTarPath, ".tar")))
+		bucket := aws.String(d.bucket)
+
+		_, err := d.s3client.HeadObject(egCtx, &s3.HeadObjectInput{
+			Key:    key,
+			Bucket: bucket,
+		})
+		if err == nil {
+			// File is already uploaded.
+			bar.Add(int(doltSize))
+			return nil
+		}
+
+		rd := NewProgressBarReader(doltF, bar)
+		_, err = uploader.Upload(egCtx, &s3.PutObjectInput{
+			Key:           key,
+			Bucket:        bucket,
+			Body:          rd,
+			ContentLength: aws.Int64(doltSize),
+		})
+		return err
 	})
-	return err
+	eg.Go(func() error {
+		key := aws.String(filepath.Base(strings.TrimSuffix(artifacts.BinTarPath, ".tar")))
+		bucket := aws.String(d.bucket)
+
+		_, err := d.s3client.HeadObject(egCtx, &s3.HeadObjectInput{
+			Key:    key,
+			Bucket: bucket,
+		})
+		if err == nil {
+			// File is already uploaded.
+			bar.Add(int(binSize))
+			return nil
+		}
+
+		rd := NewProgressBarReader(binF, bar)
+		_, err = uploader.Upload(egCtx, &s3.PutObjectInput{
+			Key:           key,
+			Bucket:        bucket,
+			Body:          rd,
+			ContentLength: aws.Int64(binSize),
+		})
+		return err
+	})
+	eg.Go(func() error {
+		key := aws.String(filepath.Base(strings.TrimSuffix(artifacts.TestsTarPath, ".tar")))
+		bucket := aws.String(d.bucket)
+
+		_, err := d.s3client.HeadObject(egCtx, &s3.HeadObjectInput{
+			Key:    key,
+			Bucket: bucket,
+		})
+		if err == nil {
+			// File is already uploaded.
+			bar.Add(int(testsSize))
+			return nil
+		}
+
+		rd := NewProgressBarReader(testsF, bar)
+		_, err = uploader.Upload(egCtx, &s3.PutObjectInput{
+			Key:           key,
+			Bucket:        bucket,
+			Body:          rd,
+			ContentLength: aws.Int64(testsSize),
+		})
+		return err
+	})
+
+	return eg.Wait()
 }

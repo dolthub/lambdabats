@@ -42,8 +42,14 @@ func handleRequest(ctx context.Context, request events.LambdaFunctionURLRequest)
 	if err != nil {
 		return events.LambdaFunctionURLResponse{}, err
 	}
-	if testReq.TestLocation == "" {
-		return events.LambdaFunctionURLResponse{Body: "must supply test_location", StatusCode: 400}, nil
+	if testReq.DoltLocation == "" {
+		return events.LambdaFunctionURLResponse{Body: "must supply dolt_location", StatusCode: 400}, nil
+	}
+	if testReq.BinLocation == "" {
+		return events.LambdaFunctionURLResponse{Body: "must supply bin_location", StatusCode: 400}, nil
+	}
+	if testReq.BatsLocation == "" {
+		return events.LambdaFunctionURLResponse{Body: "must supply bats_location", StatusCode: 400}, nil
 	}
 	if testReq.FileName == "" {
 		return events.LambdaFunctionURLResponse{Body: "must supply file_name", StatusCode: 400}, nil
@@ -63,7 +69,7 @@ func handleRequest(ctx context.Context, request events.LambdaFunctionURLRequest)
 		return events.LambdaFunctionURLResponse{}, err
 	}
 
-	runLocation, err := UnpackTest(ctx, downloader, testReq.TestLocation)
+	runLocation, newPath, err := UnpackTest(ctx, downloader, testReq.DoltLocation, testReq.BinLocation, testReq.BatsLocation)
 	if err != nil {
 		return events.LambdaFunctionURLResponse{}, err
 	}
@@ -96,7 +102,7 @@ func handleRequest(ctx context.Context, request events.LambdaFunctionURLRequest)
 	}
 	cmd.Dir = filepath.Join(runLocation, "bats")
 	cmd.Env = os.Environ()
-	cmd.Env = append(cmd.Env, "PATH="+filepath.Join(runLocation, "bin")+":"+os.Getenv("PATH"))
+	cmd.Env = append(cmd.Env, "PATH="+newPath+":"+os.Getenv("PATH"))
 	cmd.Env = append(cmd.Env, "TMPDIR="+batsTempDir)
 	cmd.Env = append(cmd.Env, "HOME="+homeTempDir)
 	cmd.Args = []string{
@@ -175,57 +181,73 @@ func (d *CopyingDownloader) Download(ctx context.Context, dest, name string) err
 	return err
 }
 
-func UnpackTest(ctx context.Context, downloader Downloader, test string) (string, error) {
+func UnpackTest(ctx context.Context, downloader Downloader, dolt, bin, test string) (string, string, error) {
 	testDir := filepath.Join(os.TempDir(), "downloaded_tests")
-	destDir := filepath.Join(testDir, test)
-	sentinelPath := filepath.Join(destDir, ".downloaded")
+	testDestDir := filepath.Join(testDir, test)
+	err := DownloadAndUntar(ctx, downloader, testDestDir, test)
+	if err != nil {
+		return "", "", err
+	}
+
+	binDir := filepath.Join(os.TempDir(), "downloaded_bins")
+	binDestDir := filepath.Join(binDir, bin)
+	err = DownloadAndUntar(ctx, downloader, binDestDir, bin)
+	if err != nil {
+		return "", "", err
+	}
+
+	doltDir := filepath.Join(os.TempDir(), "downloaded_dolts")
+	doltDestDir := filepath.Join(doltDir, dolt)
+	err = DownloadAndUntar(ctx, downloader, doltDestDir, dolt)
+	if err != nil {
+		return "", "", err
+	}
+
+	return testDestDir, filepath.Join(doltDestDir, "bin") + ":" + filepath.Join(binDestDir, "bin"), nil
+}
+
+func DownloadAndUntar(ctx context.Context, downloader Downloader, dest, name string) error {
+	sentinelPath := filepath.Join(dest, ".downloaded")
 	f, err := os.Open(sentinelPath)
 	if err == nil {
 		f.Close()
-		return destDir, nil
+		return nil
 	}
 
 	// If the setinel path doesn't exist, we create it.
-	err = os.RemoveAll(testDir)
+	// XXX: A bit gross here...
+	err = os.RemoveAll(filepath.Join(dest, ".."))
 	if err != nil {
-		return "", err
+		return err
 	}
-	err = os.MkdirAll(destDir, 0777)
+	err = os.MkdirAll(dest, 0777)
 	if err != nil {
-		return "", err
+		return err
 	}
 
 	// Now we invoke the downloader to get the .tar file.
-	tarDestPath := filepath.Join(destDir, test+".tar")
-	err = downloader.Download(ctx, tarDestPath, test)
+	tarDestPath := filepath.Join(dest, name+".tar")
+	err = downloader.Download(ctx, tarDestPath, name)
 	if err != nil {
-		return "", err
+		return err
 	}
 
-	// Unpack the test tar file.
 	untar := exec.Command("tar")
 	untar.Args = []string{"tar", "xf", tarDestPath}
-	untar.Dir = destDir
+	untar.Dir = dest
 	out, err := untar.CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("could not untar %s: %w\n\n%s", tarDestPath, err, string(out))
-	}
-	untar = exec.Command("tar")
-	untar.Args = []string{"tar", "xf", "bats.tar"}
-	untar.Dir = destDir
-	err = untar.Run()
-	if err != nil {
-		return "", fmt.Errorf("could not untar bats.tar: %w", err)
+		return fmt.Errorf("could not untar %s: %w\n\n%s", tarDestPath, err, string(out))
 	}
 
 	// Touch the sentinel file.
 	f, err = os.Create(sentinelPath)
 	if err != nil {
-		return "", fmt.Errorf("could not make sentine file %s: %w", sentinelPath, err)
+		return fmt.Errorf("could not make sentine file %s: %w", sentinelPath, err)
 	}
 	f.Close()
 
-	return destDir, nil
+	return nil
 }
 
 func main() {

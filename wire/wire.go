@@ -15,10 +15,27 @@
 package wire
 
 type RunTestRequest struct {
-	TestLocation string `json:"test_location"`
-	FileName     string `json:"file_name"`
-	TestName     string `json:"test_name"`
-	TestFilter   string `json:"test_filter"`
+	// The name of the uploaded file which contains the tarball with
+	// bats/*.
+	BatsLocation string `json:"bats_location"`
+
+	// The name of the uploaded file which contains the tarball with test
+	// uploaded bin/* files. Currently remotesrv.
+	BinLocation string `json:"bin_location"`
+
+	// The name of the uploaded file which contains the tarball with
+	// bin/dolt.
+	DoltLocation string `json:"dolt_location"`
+
+	// The test file run, for example, sql-server.bats.
+	FileName string `json:"file_name"`
+
+	// The test name within the file to run.
+	TestName string `json:"test_name"`
+
+	// The filter string to pass to the `bats` invocation to actually run
+	// the targetted test. This is an escaped version of the test_name.
+	TestFilter string `json:"test_filter"`
 }
 
 type RunTestResult struct {

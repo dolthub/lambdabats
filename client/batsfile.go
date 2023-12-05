@@ -21,8 +21,8 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"strings"
 	"path/filepath"
+	"strings"
 
 	"github.com/reltuk/lambda-play/wire"
 )

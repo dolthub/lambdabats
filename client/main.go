@@ -127,7 +127,7 @@ func main() {
 		config = NewTestRunConfig()
 	}
 
-	testLocation, err := UploadTests(ctx, config.Uploader, doltSrcDir)
+	testArtifacts, err := UploadTests(ctx, config.Uploader, doltSrcDir)
 	if err != nil {
 		panic(err)
 	}
@@ -145,7 +145,9 @@ func main() {
 		eg.Go(func() error {
 			filter := EscapeNameForFilter(files[fi].Tests[ti].Name)
 			req := wire.RunTestRequest{
-				TestLocation: testLocation,
+				DoltLocation: testArtifacts.DoltPath,
+				BinLocation:  testArtifacts.BinPath,
+				BatsLocation: testArtifacts.TestsPath,
 				FileName:     files[fi].Name,
 				TestName:     files[fi].Tests[ti].Name,
 				TestFilter:   filter,

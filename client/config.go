@@ -50,15 +50,15 @@ const AwsConfig = `
 [default]
 region = us-west-2
 
-[profile corp_admin]
-role_arn = arn:aws:iam::407903926827:role/SRE
+[profile corp_runner]
+role_arn = arn:aws:iam::407903926827:role/RunBatsInLambda
 region = us-west-2
-source_profile = corp_sso_sre
+source_profile = corp_sso_developer
 
-[profile corp_sso_sre]
+[profile corp_sso_developer]
 sso_session = dolthub_sso_session
 sso_account_id = 407903926827
-sso_role_name = SRE
+sso_role_name = DoltHubDeveloper
 region = us-west-2
 
 [sso-session dolthub_sso_session]
@@ -98,7 +98,7 @@ func NewAWSRunConfig(ctx context.Context, envCreds bool) (RunConfig, error) {
 		err = WithAWSConfig(func(path string) error {
 			cfg, err = config.LoadDefaultConfig(ctx,
 				config.WithSharedConfigFiles([]string{path}),
-				config.WithSharedConfigProfile("corp_admin"),
+				config.WithSharedConfigProfile("corp_runner"),
 				config.WithRegion("us-west-2"),
 				config.WithSharedCredentialsFiles(nil))
 			return err

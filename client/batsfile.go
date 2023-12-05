@@ -22,6 +22,7 @@ import (
 	"io/fs"
 	"os"
 	"strings"
+	"path/filepath"
 
 	"github.com/reltuk/lambda-play/wire"
 )
@@ -123,21 +124,54 @@ func SkippedJUnitTestCaseOutput(filename, testname, reason string) string {
 }
 
 // Read the *.bats files in a directory and collect the tests found in them.
-func LoadTestFiles(dir string) ([]TestFile, int, error) {
-	fileSys := os.DirFS(dir)
-	entries, err := fs.ReadDir(fileSys, ".")
-	if err != nil {
-		return nil, 0, err
-	}
+func LoadTestFiles(args []string) ([]TestFile, int, error) {
 	numTests := 0
 	var files []TestFile
-	for _, e := range entries {
-		if strings.HasSuffix(e.Name(), ".bats") {
-			files = append(files, TestFile{Name: e.Name()})
+
+	var fileSys fs.FS
+	var batsDir string
+
+	for _, arg := range args {
+		f, err := os.Open(arg)
+		if err != nil {
+			return nil, 0, err
+		}
+		fi, err := f.Stat()
+		f.Close()
+		if err != nil {
+			return nil, 0, err
+		}
+		if fi.IsDir() {
+			if batsDir == "" {
+				batsDir = arg
+			} else if batsDir != arg {
+				return nil, 0, errors.New("error loading test files: all bats files must be in a single directory")
+			}
+			fileSys = os.DirFS(arg)
+			entries, err := fs.ReadDir(fileSys, ".")
+			if err != nil {
+				return nil, 0, err
+			}
+			for _, e := range entries {
+				if strings.HasSuffix(e.Name(), ".bats") {
+					files = append(files, TestFile{Name: e.Name()})
+				}
+			}
+		} else {
+			if batsDir == "" {
+				batsDir = filepath.Dir(arg)
+			} else if batsDir != filepath.Dir(arg) {
+				return nil, 0, errors.New("error loading test files: all bats files must be in a single directory")
+			}
+			if fileSys == nil {
+				fileSys = os.DirFS(batsDir)
+			}
+			files = append(files, TestFile{Name: filepath.Base(arg)})
 		}
 	}
 
 	for i := range files {
+		var err error
 		files[i].Tests, err = LoadTests(fileSys, files[i])
 		if err != nil {
 			return nil, 0, err

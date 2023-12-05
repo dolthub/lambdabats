@@ -59,7 +59,7 @@ func GetDoltSrcDir(args []string) (string, error) {
 	if fi.IsDir() {
 		doltDirPath = filepath.Join(path, "../../")
 	} else {
-		doltDirPath = filepath.Join(filepath.Base(path), "../../")
+		doltDirPath = filepath.Join(filepath.Dir(path), "../../")
 	}
 
 	d, err := os.Open(doltDirPath)
@@ -132,7 +132,7 @@ func main() {
 		panic(err)
 	}
 
-	files, total, err := LoadTestFiles(filepath.Join(doltSrcDir, "integration-tests/bats"))
+	files, total, err := LoadTestFiles(fileArgs)
 	if err != nil {
 		panic(err)
 	}

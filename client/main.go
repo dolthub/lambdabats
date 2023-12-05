@@ -82,6 +82,7 @@ type Test struct {
 	Name string
 	Tags []string
 	Runs []TestRun
+	File TestFile
 }
 
 func (t Test) HasTag(tag string) bool {
@@ -111,12 +112,10 @@ type TestRunResult struct {
 }
 
 func (tr TestRun) Result(name string) (TestRunResult, error) {
-	type Skipped struct {
-	}
 	type TestCase struct {
-		Name    string   `xml:"name,attr"`
-		Skipped *Skipped `xml:"skipped"`
-		Failure *string  `xml:"failure"`
+		Name    string  `xml:"name,attr"`
+		Skipped *string `xml:"skipped"`
+		Failure *string `xml:"failure"`
 	}
 	type TestSuite struct {
 		TestCases []TestCase `xml:"testcase"`
@@ -149,12 +148,25 @@ func (tr TestRun) Result(name string) (TestRunResult, error) {
 		return TestRunResult{}, fmt.Errorf("expected to find a testcase element with name \"%s\"", name)
 	}
 	if tc.Skipped != nil {
-		return TestRunResult{Status: TestRunResultStatus_Skipped}, nil
+		return TestRunResult{Status: TestRunResultStatus_Skipped, Output: *tc.Skipped}, nil
 	}
 	if tc.Failure != nil {
 		return TestRunResult{Status: TestRunResultStatus_Failure, Output: *tc.Failure}, nil
 	}
 	return TestRunResult{Status: TestRunResultStatus_Success}, nil
+}
+
+func SkippedJUnitTestCaseOutput(filename, testname, reason string) string {
+	return `
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites time="0">
+<testsuite name="` + filename + `" tests="1" failures="0" errors="0" skipped="1" time="0">
+    <testcase classname="` + filename + `" name="` + testname + `" time="0">
+       <skipped>` + reason + `</skipped>
+    </testcase>
+</testsuite>
+</testsuites>
+`
 }
 
 func main() {
@@ -196,16 +208,7 @@ func main() {
 				bar.Add(1)
 				files[fi].Tests[ti].Runs = append(files[fi].Tests[ti].Runs, TestRun{
 					Response: wire.RunTestResult{
-						Output: `
-<?xml version="1.0" encoding="UTF-8"?>
-<testsuites time="0">
-<testsuite name="` + files[fi].Name + `" tests="1" failures="0" errors="0" skipped="1" time="0">
-    <testcase classname="` + files[fi].Name + `" name="` + files[fi].Tests[ti].Name + `" time="0">
-       <skipped></skipped>
-    </testcase>
-</testsuite>
-</testsuites>
-`,
+						Output: SkippedJUnitTestCaseOutput(files[fi].Name, files[fi].Tests[ti].Name, "lambda runner does not support virtual ttys"),
 					},
 				})
 				return nil
@@ -240,10 +243,15 @@ func main() {
 	bar.Finish()
 	bar.Close()
 
+	// Print the results...
+	res := OutputTAPResults(files)
+	os.Exit(res)
+}
+
+func OutputBatsResults(files []TestFile) int {
 	blue := color.New(color.FgBlue)
 	red := color.New(color.FgRed)
 
-	// Print the results...
 	numTests := 0
 	numSkipped := 0
 	numFailed := 0
@@ -268,7 +276,11 @@ func main() {
 				fmt.Printf("  ✓ %s\n", t.Name)
 			} else if res.Status == TestRunResultStatus_Skipped {
 				numSkipped += 1
-				fmt.Printf("  - %s (skipped)\n", t.Name)
+				if res.Output == "" {
+					fmt.Printf("  - %s (skipped)\n", t.Name)
+				} else {
+					fmt.Printf("  - %s (skipped: %s)\n", t.Name, res.Output)
+				}
 			} else {
 				numFailed += 1
 				red.Printf("  ✗ %s\n", t.Name)
@@ -286,6 +298,59 @@ func main() {
 	} else {
 		fmt.Printf("%d tests, %d failures, %d skipped\n", numTests, numFailed, numSkipped)
 	}
+
+	if numFailed == 0 && numFatal == 0 {
+		return 0
+	}
+	return 1
+}
+
+func OutputTAPResults(files []TestFile) int {
+	numTests := 0
+	numFailed := 0
+	numFatal := 0
+	for _, f := range files {
+		numTests += len(f.Tests)
+	}
+	fmt.Printf("1..%d\n", numTests)
+	i := 1
+	for _, f := range files {
+		for _, t := range f.Tests {
+			res, err := t.Runs[0].Result(t.Name)
+			if err != nil {
+				numFatal += 1
+				fmt.Printf("not ok %d %s\n", i, t.Name)
+				for _, line := range strings.Split(t.Runs[0].Response.Err, "\n") {
+					fmt.Printf("#%s\n", line)
+				}
+				for _, line := range strings.Split(t.Runs[0].Response.Output, "\n") {
+					fmt.Printf("#%s\n", line)
+				}
+				continue
+			}
+			if res.Status == TestRunResultStatus_Success {
+				fmt.Printf("ok %d %s\n", i, t.Name)
+			} else if res.Status == TestRunResultStatus_Skipped {
+				if res.Output == "" {
+					fmt.Printf("ok %d %s # skip\n", i, t.Name)
+				} else {
+					fmt.Printf("ok %d %s # skip %s\n", i, t.Name, res.Output)
+				}
+			} else {
+				numFailed += 1
+				fmt.Printf("not ok %d %s\n", i, t.Name)
+				for _, line := range strings.Split(res.Output, "\n") {
+					fmt.Printf("#%s\n", line)
+				}
+			}
+			i += 1
+		}
+	}
+
+	if numFailed == 0 && numFatal == 0 {
+		return 0
+	}
+	return 1
 }
 
 // Read the *.bats files in a directory and collect the tests found in them.
@@ -304,7 +369,7 @@ func LoadTestFiles(dir string) ([]TestFile, int, error) {
 	}
 
 	for i := range files {
-		files[i].Tests, err = LoadTests(fileSys, files[i].Name)
+		files[i].Tests, err = LoadTests(fileSys, files[i])
 		if err != nil {
 			return nil, 0, err
 		}
@@ -314,8 +379,8 @@ func LoadTestFiles(dir string) ([]TestFile, int, error) {
 	return files, numTests, nil
 }
 
-func LoadTests(fileSys fs.FS, filename string) ([]Test, error) {
-	f, err := fileSys.Open(filename)
+func LoadTests(fileSys fs.FS, tf TestFile) ([]Test, error) {
+	f, err := fileSys.Open(tf.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -331,7 +396,7 @@ func LoadTests(fileSys fs.FS, filename string) ([]Test, error) {
 		} else if strings.HasPrefix(line, "@test \"") {
 			line = strings.TrimPrefix(line, "@test \"")
 			line = strings.TrimRight(line, "\" {")
-			res = append(res, Test{Name: line, Tags: tags})
+			res = append(res, Test{Name: line, Tags: tags, File: tf})
 			tags = nil
 		}
 	}
@@ -368,7 +433,10 @@ func RunWithSpinner(message string, work func() error) error {
 }
 
 func BuildTestsFile(doltSrcDir string) (string, error) {
-	doltBinFilePath := filepath.Join(os.TempDir(), uuid.New().String())
+	binDir := filepath.Join(os.TempDir(), uuid.New().String())
+	defer os.RemoveAll(binDir)
+
+	doltBinFilePath := filepath.Join(binDir, "dolt")
 	err := RunWithSpinner("building dolt...", func() error {
 		compileDolt := exec.Command("go")
 		compileDolt.Args = []string{
@@ -386,7 +454,7 @@ func BuildTestsFile(doltSrcDir string) (string, error) {
 		return "", err
 	}
 
-	remotesrvBinFilePath := filepath.Join(os.TempDir(), uuid.New().String())
+	remotesrvBinFilePath := filepath.Join(binDir, "remotesrv")
 	err = RunWithSpinner("building remotesrv...", func() error {
 		compileRemotesrv := exec.Command("go")
 		compileRemotesrv.Args = []string{
@@ -405,13 +473,39 @@ func BuildTestsFile(doltSrcDir string) (string, error) {
 	}
 
 	batsTarFilePath := filepath.Join(os.TempDir(), uuid.New().String())
+	defer os.RemoveAll(batsTarFilePath)
+
 	err = RunWithSpinner("building bats.tar...", func() error {
-		tarBatsFiles := exec.Command("tar")
-		tarBatsFiles.Args = []string{
-			"tar", "cf", batsTarFilePath, "-C", "integration-tests", "bats",
+		f, err := os.Create(batsTarFilePath)
+		if err != nil {
+			return err
 		}
-		tarBatsFiles.Dir = doltSrcDir
-		err = tarBatsFiles.Run()
+		defer f.Close()
+		w := tar.NewWriter(f)
+		defer w.Close()
+
+		dfs := os.DirFS(filepath.Join(doltSrcDir, "integration-tests"))
+		err = fs.WalkDir(dfs, "bats", func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			fi, err := d.Info()
+			if err != nil {
+				return err
+			}
+			if d.IsDir() {
+				return w.WriteHeader(&tar.Header{
+					Name: path + "/",
+					Mode: int64(fi.Mode()),
+				})
+			} else {
+				return WriteFileToTar(w, &tar.Header{
+					Name: path,
+					Mode: int64(fi.Mode()),
+				}, filepath.Join(filepath.Join(doltSrcDir, "integration-tests"), path))
+
+			}
+		})
 		if err != nil {
 			return fmt.Errorf("error taring up bats tests: %w", err)
 		}
@@ -563,6 +657,7 @@ func UploadTests(ctx context.Context, uploader Uploader, doltSrcDir string) (str
 	if err != nil {
 		return "", err
 	}
+	defer os.RemoveAll(testsTar)
 	err = uploader.Upload(ctx, testsTar)
 	if err != nil {
 		return "", err
@@ -581,6 +676,9 @@ func WriteFileToTar(w *tar.Writer, header *tar.Header, path string) error {
 		return err
 	}
 	header.Size = stat.Size()
+	if header.Mode == 0 {
+		header.Mode = int64(stat.Mode())
+	}
 	err = w.WriteHeader(header)
 	if err != nil {
 		return err

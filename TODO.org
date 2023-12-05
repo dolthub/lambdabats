@@ -16,7 +16,7 @@ cd /opt/parquet-1.12.1
 curl -OL https://repo1.maven.org/maven2/org/apache/parquet/parquet-cli/1.12.1/parquet-cli-1.12.1-runtime.jar
 PARQUET_RUNTIME_JAR=/opt/parquet-1.12.1/parquet-cli-1.12.1-runtime.jar
 
-* Change client code so that it prints progress around building dolt, building remotesrv, uploading test bundle.
+* DONE Change client code so that it prints progress around building dolt, building remotesrv, uploading test bundle.
 
 * Change client code so it builds up its SharedConfig manully.
 
@@ -24,9 +24,11 @@ PARQUET_RUNTIME_JAR=/opt/parquet-1.12.1/parquet-cli-1.12.1-runtime.jar
 
 * DONE Change client code so that tests that opt out of lambda do not get requested.
 
-* Change client code so that tests which opt out of lambda get run locally.
+* Change client code so that tests which opt out of lambda can get run locally.
 
-* Change client code so that it can output TAP format.
+* DONE Change client code so that it can output TAP format.
+
+* DONE Change client code so that it builds bats.tar directly, not by invoking `tar`.
 
 * DoltBatsRunner role in corp.
 

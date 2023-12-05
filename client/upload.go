@@ -27,7 +27,6 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/google/uuid"
@@ -224,11 +223,7 @@ type S3Uploader struct {
 	bucket   string
 }
 
-func NewS3Uploader(ctx context.Context, bucket string) (*S3Uploader, error) {
-	cfg, err := config.LoadDefaultConfig(ctx)
-	if err != nil {
-		return nil, err
-	}
+func NewS3Uploader(ctx context.Context, cfg aws.Config, bucket string) (*S3Uploader, error) {
 	return &S3Uploader{
 		s3client: s3.NewFromConfig(cfg),
 		bucket:   bucket,

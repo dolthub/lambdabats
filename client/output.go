@@ -84,6 +84,8 @@ func RunWithSpinner(message string, work func() error) error {
 	return eg.Wait()
 }
 
+type OutputResultsFunc = func(files []TestFile) int
+
 func OutputBatsResults(files []TestFile) int {
 	blue := color.New(color.FgBlue)
 	red := color.New(color.FgRed)

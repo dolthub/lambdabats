@@ -26,7 +26,6 @@ import (
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/lambda"
 
 	"github.com/reltuk/lambda-play/wire"
@@ -128,11 +127,7 @@ type LambdaInvokeRunner struct {
 
 var _ Runner = (*LambdaInvokeRunner)(nil)
 
-func NewLambdaInvokeRunner(ctx context.Context, function string) (*LambdaInvokeRunner, error) {
-	cfg, err := config.LoadDefaultConfig(ctx)
-	if err != nil {
-		return nil, err
-	}
+func NewLambdaInvokeRunner(ctx context.Context, cfg aws.Config, function string) (*LambdaInvokeRunner, error) {
 	return &LambdaInvokeRunner{
 		function: function,
 		client:   lambda.NewFromConfig(cfg),

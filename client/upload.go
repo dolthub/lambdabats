@@ -149,7 +149,6 @@ func BuildTestsFile(doltSrcDir string) (UploadArtifacts, error) {
 			Mode: 0777,
 		}, doltBinFilePath)
 		if err != nil {
-			panic(err)
 			return err
 		}
 		return nil
@@ -188,7 +187,6 @@ func BuildTestsFile(doltSrcDir string) (UploadArtifacts, error) {
 			Mode: 0777,
 		}, remotesrvBinFilePath)
 		if err != nil {
-			panic(err)
 			return err
 		}
 		return nil
@@ -213,13 +211,11 @@ func BuildTestsFile(doltSrcDir string) (UploadArtifacts, error) {
 	err = func() error {
 		f, err := os.Create(batsTarPath)
 		if err != nil {
-			panic(err)
 			return err
 		}
 		defer f.Close()
 		src, err := os.Open(batsTarFilePath)
 		if err != nil {
-			panic(err)
 			return err
 		}
 		defer src.Close()
@@ -335,46 +331,36 @@ func NewS3Uploader(ctx context.Context, cfg aws.Config, bucket string) (*S3Uploa
 func (d *S3Uploader) Upload(ctx context.Context, artifacts UploadArtifacts) error {
 	doltF, err := os.Open(artifacts.DoltTarPath)
 	if err != nil {
-		panic(err)
 		return err
 	}
 	defer doltF.Close()
 	fi, err := doltF.Stat()
 	if err != nil {
-		panic(err)
 		return err
 	}
 	doltSize := fi.Size()
 
 	binF, err := os.Open(artifacts.BinTarPath)
 	if err != nil {
-		panic(err)
 		return err
 	}
 	defer binF.Close()
 	fi, err = binF.Stat()
 	if err != nil {
-		panic(err)
 		return err
 	}
 	binSize := fi.Size()
 
 	testsF, err := os.Open(artifacts.TestsTarPath)
 	if err != nil {
-		panic(err)
 		return err
 	}
 	defer testsF.Close()
 	fi, err = testsF.Stat()
 	if err != nil {
-		panic(err)
 		return err
 	}
 	testsSize := fi.Size()
-
-	fmt.Println(artifacts.DoltTarPath)
-	fmt.Println(artifacts.BinTarPath)
-	fmt.Println(artifacts.TestsTarPath)
 
 	size := doltSize + binSize + testsSize
 

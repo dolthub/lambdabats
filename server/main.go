@@ -37,6 +37,9 @@ func handleRequest(ctx context.Context, request events.LambdaFunctionURLRequest)
 	if testReq.TestName == "" {
 		return events.LambdaFunctionURLResponse{Body: "must supply test_name", StatusCode: 400}, nil
 	}
+	if testReq.TestFilter == "" {
+		return events.LambdaFunctionURLResponse{Body: "must supply test_filter", StatusCode: 400}, nil
+	}
 
 	downloader, err := NewTestDownloader()
 	if _, ok := os.LookupEnv("USE_LOCAL_DOWNLOADER"); !ok {
@@ -83,7 +86,7 @@ func handleRequest(ctx context.Context, request events.LambdaFunctionURLRequest)
 	cmd.Env = append(cmd.Env, "TMPDIR="+batsTempDir)
 	cmd.Env = append(cmd.Env, "HOME="+homeTempDir)
 	cmd.Args = []string{
-		"bats", "-F", "junit", "-f", testReq.TestName, testReq.FileName,
+		"bats", "-F", "junit", "-f", testReq.TestFilter, testReq.FileName,
 	}
 	output, err := cmd.CombinedOutput()
 	if err != nil {

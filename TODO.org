@@ -24,7 +24,7 @@ PARQUET_RUNTIME_JAR=/opt/parquet-1.12.1/parquet-cli-1.12.1-runtime.jar
 
 * DONE Change client code so that tests that opt out of lambda do not get requested.
 
-* Change client code so that tests which opt out of lambda can get run locally.
+* DONE Change client code so that tests which opt out of lambda can get run locally.
 
 * DONE Change client code so that it can output TAP format.
 

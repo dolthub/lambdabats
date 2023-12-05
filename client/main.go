@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aws/aws-lambda-go/events"
@@ -156,6 +157,51 @@ func (tr TestRun) Result(name string) (TestRunResult, error) {
 	return TestRunResult{Status: TestRunResultStatus_Success}, nil
 }
 
+type SkipRunner struct {
+	reason string
+}
+
+func NewSkipRunner(reason string) SkipRunner {
+	return SkipRunner{reason: reason}
+}
+
+func (r SkipRunner) Run(ctx context.Context, req wire.RunTestRequest) (wire.RunTestResult, error) {
+	return wire.RunTestResult{
+		Output: SkippedJUnitTestCaseOutput(req.FileName, req.TestName, r.reason),
+	}, nil
+}
+
+type LocalRunner struct {
+	batsDir string
+
+	// Only one test can run locally at a time.
+	mu sync.Mutex
+}
+
+func NewLocalRunner(batsDir string) *LocalRunner {
+	return &LocalRunner{batsDir: batsDir}
+}
+
+func (r *LocalRunner) Run(ctx context.Context, req wire.RunTestRequest) (wire.RunTestResult, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	cmd := exec.Command("bats")
+	cmd.Dir = r.batsDir
+	cmd.Args = []string{
+		"bats", "-F", "junit", "-f", req.TestFilter, req.FileName,
+	}
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return wire.RunTestResult{
+			Output: string(output),
+			Err:    err.Error(),
+		}, nil
+	}
+	return wire.RunTestResult{
+		Output: string(output),
+	}, nil
+}
+
 func SkippedJUnitTestCaseOutput(filename, testname, reason string) string {
 	return `
 <?xml version="1.0" encoding="UTF-8"?>
@@ -198,27 +244,27 @@ func main() {
 		panic(err)
 	}
 
+	var fallbackRunner Runner = NewSkipRunner("lambda runner does not support virtual ttys")
+	fallbackRunner = NewLocalRunner(filepath.Join(doltSrcDir, "integration-tests/bats"))
+
 	eg, egCtx := errgroup.WithContext(ctx)
 	eg.SetLimit(config.Concurrency)
 	bar := progressbar.Default(int64(total), "running tests")
 
 	RunTest := func(fi, ti int) {
 		eg.Go(func() error {
-			if files[fi].Tests[ti].HasTag("no_lambda") {
-				bar.Add(1)
-				files[fi].Tests[ti].Runs = append(files[fi].Tests[ti].Runs, TestRun{
-					Response: wire.RunTestResult{
-						Output: SkippedJUnitTestCaseOutput(files[fi].Name, files[fi].Tests[ti].Name, "lambda runner does not support virtual ttys"),
-					},
-				})
-				return nil
-			}
 			filter := EscapeNameForFilter(files[fi].Tests[ti].Name)
-			resp, err := config.Runner.Run(egCtx, wire.RunTestRequest{
+			req := wire.RunTestRequest{
 				TestLocation: testLocation,
 				FileName:     files[fi].Name,
-				TestName:     filter,
-			})
+				TestName:     files[fi].Tests[ti].Name,
+				TestFilter:   filter,
+			}
+			runner := config.Runner
+			if files[fi].Tests[ti].HasTag("no_lambda") {
+				runner = fallbackRunner
+			}
+			resp, err := runner.Run(egCtx, req)
 			if err != nil {
 				return err
 			}
@@ -244,7 +290,7 @@ func main() {
 	bar.Close()
 
 	// Print the results...
-	res := OutputTAPResults(files)
+	res := OutputBatsResults(files)
 	os.Exit(res)
 }
 

@@ -1,10 +1,7 @@
 #!/bin/bash
 
-yum -y groupinstall "Development Tools"
-yum -y install yum-utils glibc-all-langpacks ncurses-devel texinfo
+set -e
 
-useradd -m builder
-su -l builder
 cd
 
 yumdownloader --source bash
@@ -20,10 +17,10 @@ sed \
 
 rpmbuild -ba --nocheck bash.spec
 
-/home/builder/rpmbuild/RPMS/aarch64/bash-5.2.15-1.amzn2023.0.2.1.aarch64.rpm
-/home/builder/rpmbuild/RPMS/aarch64/bash-debuginfo-5.2.15-1.amzn2023.0.2.1.aarch64.rpm
-/home/builder/rpmbuild/RPMS/aarch64/bash-debugsource-5.2.15-1.amzn2023.0.2.1.aarch64.rpm
-/home/builder/rpmbuild/RPMS/aarch64/bash-devel-5.2.15-1.amzn2023.0.2.1.aarch64.rpm
-/home/builder/rpmbuild/RPMS/aarch64/bash-doc-5.2.15-1.amzn2023.0.2.1.aarch64.rpm
-
-/home/builder/rpmbuild/SRPMS/bash-5.2.15-1.amzn2023.0.2.1.src.rpm
+#/home/builder/rpmbuild/RPMS/aarch64/bash-5.2.15-1.amzn2023.0.2.1.aarch64.rpm
+#/home/builder/rpmbuild/RPMS/aarch64/bash-debuginfo-5.2.15-1.amzn2023.0.2.1.aarch64.rpm
+#/home/builder/rpmbuild/RPMS/aarch64/bash-debugsource-5.2.15-1.amzn2023.0.2.1.aarch64.rpm
+#/home/builder/rpmbuild/RPMS/aarch64/bash-devel-5.2.15-1.amzn2023.0.2.1.aarch64.rpm
+#/home/builder/rpmbuild/RPMS/aarch64/bash-doc-5.2.15-1.amzn2023.0.2.1.aarch64.rpm
+#
+#/home/builder/rpmbuild/SRPMS/bash-5.2.15-1.amzn2023.0.2.1.src.rpm

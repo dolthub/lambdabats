@@ -1,20 +1,46 @@
+FROM --platform=linux/arm64 public.ecr.aws/amazonlinux/amazonlinux:2023 as rpms
+
+RUN yum -y groupinstall "Development Tools" && \
+  yum -y install yum-utils glibc-all-langpacks ncurses-devel texinfo && \
+  useradd -m builder
+
+ADD build_bash.sh /
+RUN su -l builder -c /build_bash.sh
+
+ADD bats.spec /home/builder/rpmbuild/SPECS/bats.spec
+ADD build_bats.sh /
+RUN su -l builder -c /build_bats.sh
+
 FROM --platform=linux/arm64 public.ecr.aws/lambda/provided:al2023.2023.11.18.01
 
-RUN dnf -y install tar nc procps diffutils findutils expect python3 binutils java-17-amazon-corretto-headless && pip install mysql-connector-python
+RUN dnf -y install \
+  tar \
+  nc \
+  procps \
+  diffutils \
+  findutils \
+  expect \
+  python3 \
+  binutils \
+  java-17-amazon-corretto-headless && \
+  pip install \
+    mysql-connector-python \
+    pyarrow \
+    pandas
+
 ENV JAVA_HOME=/usr/lib/jvm/java-17-amazon-corretto.aarch64/
 
-RUN cd /opt && curl -OL https://downloads.apache.org/hadoop/common/hadoop-3.3.4/hadoop-3.3.4.tar.gz && tar zxf hadoop-3.3.4.tar.gz && rm -f hadoop-3.3.4.tar.gz
-ENV PATH=/opt/hadoop-3.3.4/bin:"$PATH"
+RUN cd /opt && curl -OL https://downloads.apache.org/hadoop/common/hadoop-3.3.6/hadoop-3.3.6.tar.gz && tar zxf hadoop-3.3.6.tar.gz && rm -f hadoop-3.3.6.tar.gz
+ENV PATH=/opt/hadoop-3.3.6/bin:"$PATH"
+
 RUN mkdir /opt/parquet-1.12.1 && cd /opt/parquet-1.12.1 && curl -OL https://repo1.maven.org/maven2/org/apache/parquet/parquet-cli/1.12.1/parquet-cli-1.12.1-runtime.jar
 ENV PARQUET_RUNTIME_JAR=/opt/parquet-1.12.1/parquet-cli-1.12.1-runtime.jar
 
-# TODO: Move this up to first line when we have to rebuild with the hadoop download again.
-RUN pip install pyarrow pandas
+COPY --from=rpms /home/builder/rpmbuild/RPMS/aarch64/bats-1.10.0-1.amzn2023.0.0.aarch64.rpm /root/bats-1.10.0-1.amzn2023.0.0.aarch64.rpm
+COPY --from=rpms /home/builder/rpmbuild/RPMS/aarch64/bash-5.2.15-1.amzn2023.0.2.1.aarch64.rpm /root/bash-5.2.15-1.amzn2023.0.2.1.aarch64.rpm
 
-ADD bats-core-1.10.0.tar.gz /
-RUN /bats-core-1.10.0/install.sh /usr/local
+RUN rpm -i /root/bats-1.10.0-1.amzn2023.0.0.aarch64.rpm && rpm -U /root/bash-5.2.15-1.amzn2023.0.2.1.aarch64.rpm
 
-ADD bash /bin/bash
 ADD server /
 ADD run.sh /
 

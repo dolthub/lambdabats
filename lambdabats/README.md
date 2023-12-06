@@ -23,7 +23,9 @@ $ lambdabats login
 ```
 
 which will open a browser and put you through an SSO login flow involving your
-DoltHub Google Workspace account.
+DoltHub Google Workspace account. You must have [the AWS
+CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)
+installed.
 
 After this, you can run lambdabats similarly to how you would run bats itself.
 For example:
@@ -61,7 +63,7 @@ window.bats
 How It Works
 ------------
 
-`lambdabats` works with an alread-provisioned Lambda function that contains all
+`lambdabats` works with an already provisioned Lambda function that contains all
 the dependencies of the `bats` tests. When you invoke it, it:
 
 1) Builds `dolt` in the same repository as the tests are in.

@@ -29,7 +29,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
-	"github.com/reltuk/lambda-play/wire"
+	"github.com/dolthub/lambdabats/wire"
 )
 
 func NewTestDownloader() (Downloader, error) {
@@ -102,6 +102,7 @@ func handleRequest(ctx context.Context, request events.LambdaFunctionURLRequest)
 	}
 	cmd.Dir = filepath.Join(runLocation, "bats")
 	cmd.Env = os.Environ()
+	cmd.Env = append(cmd.Env, testReq.EnvVars...)
 	cmd.Env = append(cmd.Env, "PATH="+newPath+":"+os.Getenv("PATH"))
 	cmd.Env = append(cmd.Env, "TMPDIR="+batsTempDir)
 	cmd.Env = append(cmd.Env, "HOME="+homeTempDir)

@@ -24,7 +24,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/reltuk/lambda-play/wire"
+	"github.com/dolthub/lambdabats/wire"
 )
 
 type TestFile struct {

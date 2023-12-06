@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"os/exec"
 	"sync"
 
@@ -28,7 +29,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/lambda"
 
-	"github.com/reltuk/lambda-play/wire"
+	"github.com/dolthub/lambdabats/wire"
 )
 
 type SkipRunner struct {
@@ -60,6 +61,8 @@ func (r *LocalRunner) Run(ctx context.Context, req wire.RunTestRequest) (wire.Ru
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	cmd := exec.Command("bats")
+	cmd.Env = os.Environ()
+	cmd.Env = append(cmd.Env, EnvVars...)
 	cmd.Dir = r.batsDir
 	cmd.Args = []string{
 		"bats", "-F", "junit", "-f", req.TestFilter, req.FileName,

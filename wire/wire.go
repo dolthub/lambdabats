@@ -36,6 +36,9 @@ type RunTestRequest struct {
 	// The filter string to pass to the `bats` invocation to actually run
 	// the targetted test. This is an escaped version of the test_name.
 	TestFilter string `json:"test_filter"`
+
+	// Environment variables to set while running the tests.
+	EnvVars []string `json:"env_vars"`
 }
 
 type RunTestResult struct {

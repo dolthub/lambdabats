@@ -21,11 +21,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/schollz/progressbar/v3"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/reltuk/lambda-play/wire"
+	"github.com/dolthub/lambdabats/wire"
 )
 
 const S3BucketName = "dolt-cloud-test-run-artifacts"
@@ -36,6 +37,8 @@ var OutputResults = OutputBatsResults
 var OutputFormat = flag.String("F", "pretty", "format the test results output; either bats pretty format or tap")
 var ExecutionStrategy = flag.String("s", "lambda", "execution strategy;\n  lambda - run most tests remote, some locally;\n  lambda_skip - run most tests remote, skip others;\n  lambda_emulator - run all tests against a local lambda simulator")
 var EnvCreds = flag.Bool("use-aws-environment-credentials", false, "by default we use hard-coded credentials which work for DoltHub developers; this uses credentials from the environment instead.")
+
+var EnvVars []string
 
 func PrintUsage() {
 	fmt.Println("usage: lambda-bats [-F pretty|tap] [-s lambda|lambda_skip|lambda_emulator] BATS_DIR_OR_FILES...")
@@ -82,11 +85,21 @@ func main() {
 		os.Exit(DoLogin())
 	}
 
+	flag.Func("env", "environment variable to set in the remote invocation; for example -env SQL_ENGINE=remote-engine", func(val string) error {
+		if !strings.Contains(val, "=") {
+			return fmt.Errorf("error, expected -env value to contain a variable setting such as ENVVAR=VALUE, got: %v", val)
+		}
+		EnvVars = append(EnvVars, val)
+		return nil
+	})
+
 	flag.Parse()
 
 	if *OutputFormat != "pretty" && *OutputFormat != "tap" {
 		fmt.Println("invalid output format")
 		PrintUsage()
+	} else if *OutputFormat == "tap" {
+		OutputResults = OutputTAPResults
 	}
 	if *ExecutionStrategy != "lambda" && *ExecutionStrategy != "lambda_skip" && *ExecutionStrategy != "lambda_emulator" {
 		fmt.Println("invalid execution strategy")
@@ -151,6 +164,7 @@ func main() {
 				FileName:     files[fi].Name,
 				TestName:     files[fi].Tests[ti].Name,
 				TestFilter:   filter,
+				EnvVars:      EnvVars,
 			}
 			runner := config.Runner
 			if files[fi].Tests[ti].HasTag("no_lambda") {

@@ -1,4 +1,4 @@
-module github.com/reltuk/lambda-play
+module github.com/dolthub/lambdabats
 
 go 1.21.2
 

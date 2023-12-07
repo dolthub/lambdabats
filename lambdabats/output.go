@@ -17,6 +17,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -86,48 +87,82 @@ func RunWithSpinner(message string, work func() error) error {
 
 type OutputResultsFunc = func(files []TestFile) int
 
+func allSuccess(test TestFile) bool {
+	for _, t := range test.Tests {
+		res, err := t.Runs[0].Result(t.Name)
+		if err != nil {
+			return false
+		}
+		if res.Status != TestRunResultStatus_Success && res.Status != TestRunResultStatus_Skipped {
+			return false
+		}
+	}
+
+	return true
+}
+
 func OutputBatsResults(files []TestFile) int {
 	blue := color.New(color.FgBlue)
 	red := color.New(color.FgRed)
+	green := color.New(color.FgGreen)
+
+	// Note this is log(n^2) thanks to running allSuccess repeatedly.
+	//TODO - precompute the stats of each file, and pretty print all the uninteresting things first.
+	sort.Slice(files, func(a, b int) bool {
+		aAllPass := allSuccess(files[a])
+		bAllPass := allSuccess(files[b])
+
+		if aAllPass && !bAllPass {
+			return true
+		} else if !aAllPass && bAllPass {
+			return false
+		} else {
+			return files[a].Name < files[b].Name
+		}
+	})
 
 	numTests := 0
 	numSkipped := 0
 	numFailed := 0
 	numFatal := 0
 	for _, f := range files {
-		blue.Println(f.Name)
-		for _, t := range f.Tests {
-			numTests += 1
-			res, err := t.Runs[0].Result(t.Name)
-			if err != nil {
-				numFatal += 1
-				red.Printf("  ✗ %s\n", t.Name)
-				for _, line := range strings.Split(t.Runs[0].Response.Err, "\n") {
-					red.Printf("  %s\n", line)
+		if allSuccess(f) {
+			green.Printf("%s 100%% PASSED\n", f.Name)
+		} else {
+			blue.Println(f.Name)
+			for _, t := range f.Tests {
+				numTests += 1
+				res, err := t.Runs[0].Result(t.Name)
+				if err != nil {
+					numFatal += 1
+					red.Printf("  ✗ %s\n", t.Name)
+					for _, line := range strings.Split(t.Runs[0].Response.Err, "\n") {
+						red.Printf("  %s\n", line)
+					}
+					for _, line := range strings.Split(t.Runs[0].Response.Output, "\n") {
+						red.Printf("  %s\n", line)
+					}
+					continue
 				}
-				for _, line := range strings.Split(t.Runs[0].Response.Output, "\n") {
-					red.Printf("  %s\n", line)
-				}
-				continue
-			}
-			if res.Status == TestRunResultStatus_Success {
-				fmt.Printf("  ✓ %s\n", t.Name)
-			} else if res.Status == TestRunResultStatus_Skipped {
-				numSkipped += 1
-				if res.Output == "" {
-					fmt.Printf("  - %s (skipped)\n", t.Name)
+				if res.Status == TestRunResultStatus_Success {
+					fmt.Printf("  ✓ %s\n", t.Name)
+				} else if res.Status == TestRunResultStatus_Skipped {
+					numSkipped += 1
+					if res.Output == "" {
+						fmt.Printf("  - %s (skipped)\n", t.Name)
+					} else {
+						fmt.Printf("  - %s (skipped: %s)\n", t.Name, res.Output)
+					}
 				} else {
-					fmt.Printf("  - %s (skipped: %s)\n", t.Name, res.Output)
-				}
-			} else {
-				numFailed += 1
-				red.Printf("  ✗ %s\n", t.Name)
-				for _, line := range strings.Split(res.Output, "\n") {
-					red.Printf("  %s\n", line)
+					numFailed += 1
+					red.Printf("  ✗ %s\n", t.Name)
+					for _, line := range strings.Split(res.Output, "\n") {
+						red.Printf("  %s\n", line)
+					}
 				}
 			}
+			fmt.Println()
 		}
-		fmt.Println()
 	}
 	if numFatal > 0 {
 		red.Printf("%d tests, %d fatal, %d failures, %d skipped\n", numTests, numFatal, numFailed, numSkipped)

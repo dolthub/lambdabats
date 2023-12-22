@@ -86,7 +86,7 @@ func (tr TestRun) Result(name string) (TestRunResult, error) {
 	var unmarshaled JUnitReport
 	err := xml.Unmarshal([]byte(tr.Response.Output), &unmarshaled)
 	if err != nil {
-		return TestRunResult{}, nil
+		return TestRunResult{}, err
 	}
 	if len(unmarshaled.TestSuites) != 1 {
 		return TestRunResult{}, errors.New("expected one testsuites element")

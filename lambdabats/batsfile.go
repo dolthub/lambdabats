@@ -66,6 +66,17 @@ type TestRunResult struct {
 }
 
 func (tr TestRun) Result(name string) (TestRunResult, error) {
+	// TODO: The log output from bats can include binary data
+	// and the bats formatter puts it entity-encoded into
+	// the character data.
+	//
+	// Some of these tests will fail with Fatal instead of Error.
+	// Here we replace the most common problematic character, an ASCII ESC
+	// introducing terminal control sequences which make Dolt print in
+	// colors, erase previously printed characters, etc.
+
+	toparse := strings.ReplaceAll(tr.Response.Output, "&#27;", "&#xfffd;",)
+
 	type TestCase struct {
 		Name    string  `xml:"name,attr"`
 		Skipped *string `xml:"skipped"`
@@ -84,7 +95,7 @@ func (tr TestRun) Result(name string) (TestRunResult, error) {
 	}
 
 	var unmarshaled JUnitReport
-	err := xml.Unmarshal([]byte(tr.Response.Output), &unmarshaled)
+	err := xml.Unmarshal([]byte(toparse), &unmarshaled)
 	if err != nil {
 		return TestRunResult{}, err
 	}

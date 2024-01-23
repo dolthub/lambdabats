@@ -128,6 +128,7 @@ func OutputBatsResults(files []TestFile) int {
 	for _, f := range files {
 		if allSuccess(f) {
 			green.Printf("%s 100%% PASSED\n", f.Name)
+			numTests += len(f.Tests)
 		} else {
 			blue.Println(f.Name)
 			for _, t := range f.Tests {

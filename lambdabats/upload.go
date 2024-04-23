@@ -41,13 +41,22 @@ func BuildTestsFile(doltSrcDir string) (UploadArtifacts, error) {
 	defer os.RemoveAll(binDir)
 
 	doltBinFilePath := filepath.Join(binDir, "dolt")
-	err := RunWithSpinner("building dolt...", func() error {
+	compileEnv := append(os.Environ(), "GOOS=linux", "GOARCH=arm64", "CGO_ENABLED=1")
+	_, err := exec.LookPath("zig")
+	if err == nil {
+		compileEnv = append(compileEnv, "CC=zig cc -target aarch64-linux-musl", "AS=zig as -target aarch64-linux-musl", "CGO_LDFLAGS=-static -s")
+	} else {
+		fmt.Printf("warning: Did not find `zig` on your path; cross compiling dolt with CGO_ENABLED=1 may fail.\n")
+		fmt.Printf("warning: you can find zig at https://ziglang.org/download/\n")
+	}
+	err = RunWithSpinner("building dolt...", func() error {
 		compileDolt := exec.Command("go")
 		compileDolt.Args = []string{
 			"go", "build", "-o", doltBinFilePath, "./cmd/dolt",
 		}
 		compileDolt.Dir = filepath.Join(doltSrcDir, "go")
-		compileDolt.Env = append(os.Environ(), "GOOS=linux", "GOARCH=arm64")
+		compileDolt.Env = compileEnv
+
 		out, err := compileDolt.CombinedOutput()
 		if err != nil {
 			return fmt.Errorf("error running go build dolt: %w\n%s", err, string(out))
@@ -65,7 +74,7 @@ func BuildTestsFile(doltSrcDir string) (UploadArtifacts, error) {
 			"go", "build", "-o", remotesrvBinFilePath, "./utils/remotesrv",
 		}
 		compileRemotesrv.Dir = filepath.Join(doltSrcDir, "go")
-		compileRemotesrv.Env = append(os.Environ(), "GOOS=linux", "GOARCH=arm64")
+		compileRemotesrv.Env = compileEnv
 		err = compileRemotesrv.Run()
 		if err != nil {
 			return fmt.Errorf("error building remotesrv: %w", err)

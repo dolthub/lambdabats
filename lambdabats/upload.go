@@ -41,10 +41,10 @@ func BuildTestsFile(doltSrcDir string) (UploadArtifacts, error) {
 	defer os.RemoveAll(binDir)
 
 	doltBinFilePath := filepath.Join(binDir, "dolt")
-	compileEnv := append(os.Environ(), "GOOS=linux", "GOARCH=arm64", "CGO_ENABLED=1")
+	compileEnv := append(os.Environ(), "GOOS=linux", "GOARCH=arm64")
 	_, err := exec.LookPath("zig")
 	if err == nil {
-		compileEnv = append(compileEnv, "CC=zig cc -target aarch64-linux-musl", "AS=zig as -target aarch64-linux-musl", "CGO_LDFLAGS=-static -s")
+		compileEnv = append(compileEnv, "CGO_ENABLED=1", "CC=zig cc -target aarch64-linux-musl", "AS=zig as -target aarch64-linux-musl", "CGO_LDFLAGS=-static -s")
 	} else {
 		fmt.Printf("warning: Did not find `zig` on your path; cross compiling dolt with CGO_ENABLED=1 may fail.\n")
 		fmt.Printf("warning: you can find zig at https://ziglang.org/download/\n")

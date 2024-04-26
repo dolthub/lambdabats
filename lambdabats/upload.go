@@ -19,12 +19,15 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base32"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"io/fs"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -36,23 +39,111 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+// Download a supported C compiler targeting linux-arm64 so we can build a
+// statically compiled dolt binary. Return environment variables for
+// configuring CGO to compile with this compiler.
+func StageCompiler() ([]string, error) {
+	type location struct {
+		url string
+		sha string
+	}
+	var urls = map[string]location{
+		"darwin-arm64": {
+			url: "https://dolthub-tools.s3.us-west-2.amazonaws.com/gcc/host=aarch64-darwin/target=linux-musl/20240426_0.0.1.tar.xz",
+			sha: "fb5e876c478cccb9993acb6d6bf576b2d029e43a2291b2cd093deaad858380e5",
+		},
+		"darwin-amd64": {
+			url: "https://dolthub-tools.s3.us-west-2.amazonaws.com/gcc/host=x86_64-darwin/target=linux-musl/20240426_0.0.1.tar.xz",
+			sha: "e4d1c9fc21d9827b887d1c3f92a8159a687dd2a596db77bca5b5e4dcdfc2ea5d",
+		},
+		"linux-arm64": {
+			url: "https://dolthub-tools.s3.us-west-2.amazonaws.com/gcc/host=aarch64-linux/target=linux-musl/20240426_0.0.1.tar.xz",
+			sha: "5981d3f8e4d60d5a84dbfe49a9b0715944bbc32b43e2f6b7ae4c0f675e51dc40",
+		},
+		"linux-amd64": {
+			url: "https://dolthub-tools.s3.us-west-2.amazonaws.com/gcc/host=x86_64-linux/target=linux-musl/20240426_0.0.1.tar.xz",
+			sha: "e2e837aee22ad5e5f3dd803c7d0a2861bf63385b79fd361f29a218c200ca5434",
+		},
+	}
+	plat := runtime.GOOS + "-" + runtime.GOARCH
+	loc, ok := urls[plat]
+	if !ok {
+		return nil, fmt.Errorf("unsupported runtime platform for lambda bats, %s; lambdabats needs to download a C toolchain targetting aarch64-linux-musl to run successfully", plat)
+	}
+	dest := filepath.Join(os.TempDir(), loc.sha)
+	finalVars := []string{
+		"CGO_ENABLED=1",
+		fmt.Sprintf("PATH=%s/bin%c%s", dest, filepath.ListSeparator, os.Getenv("PATH")),
+		"CC=aarch64-linux-musl-gcc",
+		"AS=aarch64-linux-musl-as",
+		"CGO_LDFLAGS=-static -s",
+	}
+	_, err := os.Stat(dest)
+	if err == nil {
+		// Toolchain is already downloaded and extracted.
+		return finalVars, nil
+	}
+	f, err := os.CreateTemp("", "lambdabats-toolchain-download")
+	if err != nil {
+		return nil, fmt.Errorf("could not create temp file for toolchain download: %w", err)
+	}
+	defer os.Remove(f.Name())
+	resp, err := http.Get(loc.url)
+	if err != nil {
+		return nil, fmt.Errorf("could not HTTP GET toolchain url: %s: %w", loc.url, err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		return nil, fmt.Errorf("unexpected HTTP status for HTTP GET toolchain url: %s: %d", loc.url, resp.Status)
+	}
+	h := sha256.New()
+	w := io.MultiWriter(f, h)
+	_, err = io.Copy(w, resp.Body)
+	resp.Body.Close()
+	f.Close()
+	if err != nil {
+		return nil, fmt.Errorf("could not copy all bytes from response body of toolchain url: %s: %w", loc.url, err)
+	}
+	if hashRes := hex.EncodeToString(h.Sum(nil)); hashRes != loc.sha {
+		return nil, fmt.Errorf("downloading toolchain failed; download checksum (%s) did not match expected checksum (%s)", hashRes, loc.sha)
+	}
+	dir, err := os.MkdirTemp("", "extracted-lambdabats-toolchain-download")
+	if err != nil {
+		return nil, fmt.Errorf("could not create temp directory for toolchain extraction: %w", err)
+	}
+	defer os.RemoveAll(dir)
+	out, err := exec.Command("tar", "Jx", "-C", dir, "--strip-components", "1", "-f", f.Name()).CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("could not create extract downloaded toolchain: %s: %w", string(out), err)
+	}
+	err = os.Rename(dir, dest)
+	if err != nil {
+		return nil, fmt.Errorf("could not rename extracted toolchain to final destination: %w", err)
+	}
+	return finalVars, nil
+}
+
 func BuildTestsFile(doltSrcDir string) (UploadArtifacts, error) {
 	binDir := filepath.Join(os.TempDir(), uuid.New().String())
 	defer os.RemoveAll(binDir)
 
 	doltBinFilePath := filepath.Join(binDir, "dolt")
 	compileEnv := append(os.Environ(), "GOOS=linux", "GOARCH=arm64")
-	_, err := exec.LookPath("zig")
-	if err == nil {
-		compileEnv = append(compileEnv, "CGO_ENABLED=1", "CC=zig cc -target aarch64-linux-musl", "AS=zig as -target aarch64-linux-musl", "CGO_LDFLAGS=-static -s")
-	} else {
-		fmt.Printf("warning: Did not find `zig` on your path; cross compiling dolt with CGO_ENABLED=1 may fail.\n")
-		fmt.Printf("warning: you can find zig at https://ziglang.org/download/\n")
+	err := RunWithSpinner("downloading toolchain...", func() error {
+		vars, err := StageCompiler()
+		if err != nil {
+			return fmt.Errorf("unable to stage compiler toolchain: %w", err)
+		}
+		compileEnv = append(compileEnv, vars...)
+		return nil
+	})
+	if err != nil {
+		return UploadArtifacts{}, err
 	}
 	err = RunWithSpinner("building dolt...", func() error {
 		compileDolt := exec.Command("go")
 		compileDolt.Args = []string{
-			"go", "build", "-o", doltBinFilePath, "./cmd/dolt",
+			"go", "build", "-ldflags=-linkmode external -s -w", "-o", doltBinFilePath, "./cmd/dolt",
 		}
 		compileDolt.Dir = filepath.Join(doltSrcDir, "go")
 		compileDolt.Env = compileEnv
@@ -71,7 +162,7 @@ func BuildTestsFile(doltSrcDir string) (UploadArtifacts, error) {
 	err = RunWithSpinner("building remotesrv...", func() error {
 		compileRemotesrv := exec.Command("go")
 		compileRemotesrv.Args = []string{
-			"go", "build", "-o", remotesrvBinFilePath, "./utils/remotesrv",
+			"go", "build", "-ldflags=-linkmode external -s -w", "-o", remotesrvBinFilePath, "./utils/remotesrv",
 		}
 		compileRemotesrv.Dir = filepath.Join(doltSrcDir, "go")
 		compileRemotesrv.Env = compileEnv

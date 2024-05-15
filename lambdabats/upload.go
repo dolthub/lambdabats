@@ -49,20 +49,20 @@ func StageCompiler() ([]string, error) {
 	}
 	var urls = map[string]location{
 		"darwin-arm64": {
-			url: "https://dolthub-tools.s3.us-west-2.amazonaws.com/gcc/host=aarch64-darwin/target=linux-musl/20240426_0.0.1.tar.xz",
-			sha: "fb5e876c478cccb9993acb6d6bf576b2d029e43a2291b2cd093deaad858380e5",
+			url: "https://dolthub-tools.s3.us-west-2.amazonaws.com/gcc/host=aarch64-darwin/target=linux-musl/20240515_0.0.2.tar.xz",
+			sha: "c3fe69b5f412c17f18efc8ddcdec4128f0103242c76b99adb3cdcf8a2c45ec89",
 		},
 		"darwin-amd64": {
-			url: "https://dolthub-tools.s3.us-west-2.amazonaws.com/gcc/host=x86_64-darwin/target=linux-musl/20240426_0.0.1.tar.xz",
-			sha: "e4d1c9fc21d9827b887d1c3f92a8159a687dd2a596db77bca5b5e4dcdfc2ea5d",
+			url: "https://dolthub-tools.s3.us-west-2.amazonaws.com/gcc/host=x86_64-darwin/target=linux-musl/20240515_0.0.2.tar.xz",
+			sha: "f1eda39fa81a3eaab4f79f0f010a2d6bf0aea395e65b3a6e87541f55cf2ac853",
 		},
 		"linux-arm64": {
-			url: "https://dolthub-tools.s3.us-west-2.amazonaws.com/gcc/host=aarch64-linux/target=linux-musl/20240426_0.0.1.tar.xz",
-			sha: "5981d3f8e4d60d5a84dbfe49a9b0715944bbc32b43e2f6b7ae4c0f675e51dc40",
+			url: "https://dolthub-tools.s3.us-west-2.amazonaws.com/gcc/host=aarch64-linux/target=linux-musl/20240515_0.0.2.tar.xz",
+			sha: "b603a5c636547e1cd0dc6cf1bba5a1f67aacb8dd21f1b12582786497311f1fa9",
 		},
 		"linux-amd64": {
-			url: "https://dolthub-tools.s3.us-west-2.amazonaws.com/gcc/host=x86_64-linux/target=linux-musl/20240426_0.0.1.tar.xz",
-			sha: "e2e837aee22ad5e5f3dd803c7d0a2861bf63385b79fd361f29a218c200ca5434",
+			url: "https://dolthub-tools.s3.us-west-2.amazonaws.com/gcc/host=x86_64-linux/target=linux-musl/20240515_0.0.2.tar.xz",
+			sha: "befaa4d83d843b8a57ea0e6a16980ffa5b5ba575f4428adec1f7f5b1aa7671f1",
 		},
 	}
 	plat := runtime.GOOS + "-" + runtime.GOARCH

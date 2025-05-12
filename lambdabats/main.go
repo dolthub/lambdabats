@@ -37,6 +37,8 @@ var OutputResults = OutputBatsResults
 var OutputFormat = flag.String("F", "pretty", "format the test results output; either bats pretty format or tap")
 var ExecutionStrategy = flag.String("s", "lambda", "execution strategy;\n  lambda - run most tests remote, some locally;\n  lambda_skip - run most tests remote, skip others;\n  lambda_emulator - run all tests against a local lambda simulator")
 var EnvCreds = flag.Bool("use-aws-environment-credentials", false, "by default we use hard-coded credentials which work for DoltHub developers; this uses credentials from the environment instead.")
+var TargetArch = flag.String("arch", "arm64", "target architecture for the lambda function; either amd64 or arm64")
+var SaveArtifacts = flag.Bool("save-artifacts", false, "Print the location of the test artifacts instead of deleting them after the test run")
 
 var EnvVars []string
 
@@ -105,6 +107,10 @@ func main() {
 		fmt.Println("invalid execution strategy")
 		PrintUsage()
 	}
+	if *TargetArch != "arm64" && *TargetArch != "amd64" {
+		fmt.Println("invalid target architecture")
+		PrintUsage()
+	}
 
 	fileArgs := flag.Args()
 	if len(fileArgs) == 0 {
@@ -140,7 +146,7 @@ func main() {
 		config = NewTestRunConfig()
 	}
 
-	testArtifacts, err := UploadTests(ctx, config.Uploader, doltSrcDir)
+	testArtifacts, err := UploadTests(ctx, config.Uploader, doltSrcDir, *TargetArch, *SaveArtifacts)
 	if err != nil {
 		panic(err)
 	}

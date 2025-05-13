@@ -372,30 +372,34 @@ func WriteFileToTar(w *tar.Writer, header *tar.Header, path string) error {
 	return err
 }
 
-func UploadTests(ctx context.Context, uploader Uploader, doltSrcDir, arch string, saveArtifacts bool) (UploadLocations, error) {
+func UploadTests(ctx context.Context, uploader Uploader, doltSrcDir, arch string, buildOnly bool) (UploadLocations, error) {
 	artifacts, err := BuildTestsFile(doltSrcDir, arch)
 	if err != nil {
 		return UploadLocations{}, err
 	}
+	ans := UploadLocations{
+		DoltPath:  filepath.Base(strings.TrimSuffix(artifacts.DoltTarPath, ".tar")),
+		BinPath:   filepath.Base(strings.TrimSuffix(artifacts.BinTarPath, ".tar")),
+		TestsPath: filepath.Base(strings.TrimSuffix(artifacts.TestsTarPath, ".tar")),
+	}
 
-	if saveArtifacts {
+	if buildOnly {
 		fmt.Println(fmt.Sprintf("Dolt Binary: %s", artifacts.DoltTarPath))
 		fmt.Println(fmt.Sprintf("RemoteSrv Binary: %s", artifacts.BinTarPath))
 		fmt.Println(fmt.Sprintf("Test Artifacts: %s", artifacts.TestsTarPath))
-	} else {
-		defer os.RemoveAll(artifacts.DoltTarPath)
-		defer os.RemoveAll(artifacts.BinTarPath)
-		defer os.RemoveAll(artifacts.TestsTarPath)
+		return ans, nil
 	}
+
+	defer os.RemoveAll(artifacts.DoltTarPath)
+	defer os.RemoveAll(artifacts.BinTarPath)
+	defer os.RemoveAll(artifacts.TestsTarPath)
+
 	err = uploader.Upload(ctx, artifacts)
 	if err != nil {
 		return UploadLocations{}, err
 	}
-	return UploadLocations{
-		DoltPath:  filepath.Base(strings.TrimSuffix(artifacts.DoltTarPath, ".tar")),
-		BinPath:   filepath.Base(strings.TrimSuffix(artifacts.BinTarPath, ".tar")),
-		TestsPath: filepath.Base(strings.TrimSuffix(artifacts.TestsTarPath, ".tar")),
-	}, nil
+	
+	return ans, nil
 }
 
 type Uploader interface {

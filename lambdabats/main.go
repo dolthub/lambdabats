@@ -38,7 +38,7 @@ var OutputFormat = flag.String("F", "pretty", "format the test results output; e
 var ExecutionStrategy = flag.String("s", "lambda", "execution strategy;\n  lambda - run most tests remote, some locally;\n  lambda_skip - run most tests remote, skip others;\n  lambda_emulator - run all tests against a local lambda simulator")
 var EnvCreds = flag.Bool("use-aws-environment-credentials", false, "by default we use hard-coded credentials which work for DoltHub developers; this uses credentials from the environment instead.")
 var TargetArch = flag.String("arch", "arm64", "target architecture for the lambda function; either amd64 or arm64")
-var SaveArtifacts = flag.Bool("save-artifacts", false, "Print the location of the test artifacts instead of deleting them after the test run")
+var BuildOnly = flag.Bool("build-only", false, "Print the location of the test artifacts and exit without running the tests.")
 
 var EnvVars []string
 
@@ -112,6 +112,11 @@ func main() {
 		PrintUsage()
 	}
 
+	if *TargetArch == "amd64" {
+		fmt.Println("Forcing --build-only because x86 is not supported")
+		*BuildOnly = true
+	}
+
 	fileArgs := flag.Args()
 	if len(fileArgs) == 0 {
 		fmt.Println("must supply tests to run")
@@ -146,9 +151,14 @@ func main() {
 		config = NewTestRunConfig()
 	}
 
-	testArtifacts, err := UploadTests(ctx, config.Uploader, doltSrcDir, *TargetArch, *SaveArtifacts)
+	testArtifacts, err := UploadTests(ctx, config.Uploader, doltSrcDir, *TargetArch, *BuildOnly)
 	if err != nil {
 		panic(err)
+	}
+
+	if *BuildOnly {
+		fmt.Println("Test artifacts saved. Exiting.")
+		os.Exit(0)
 	}
 
 	files, total, err := LoadTestFiles(fileArgs)

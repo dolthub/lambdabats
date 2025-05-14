@@ -42,7 +42,7 @@ import (
 // Download a supported C compiler targeting linux-arm64 so we can build a
 // statically compiled dolt binary. Return environment variables for
 // configuring CGO to compile with this compiler.
-func StageCompiler() ([]string, error) {
+func StageCompiler(targetArch string) ([]string, error) {
 	type location struct {
 		url string
 		sha string
@@ -74,7 +74,7 @@ func StageCompiler() ([]string, error) {
 	}
 
 	gnuArch := "x86_64"
-	if runtime.GOARCH == "arm64" {
+	if targetArch == "arm64" {
 		gnuArch = "aarch64"
 	}
 
@@ -138,7 +138,7 @@ func BuildTestsFile(doltSrcDir, arch string) (UploadArtifacts, error) {
 	doltBinFilePath := filepath.Join(binDir, "dolt")
 	compileEnv := append(os.Environ(), "GOOS=linux", "GOARCH="+arch)
 	err := RunWithSpinner("downloading toolchain...", func() error {
-		vars, err := StageCompiler()
+		vars, err := StageCompiler(arch)
 		if err != nil {
 			return fmt.Errorf("unable to stage compiler toolchain: %w", err)
 		}
@@ -398,7 +398,7 @@ func UploadTests(ctx context.Context, uploader Uploader, doltSrcDir, arch string
 	if err != nil {
 		return UploadLocations{}, err
 	}
-	
+
 	return ans, nil
 }
 

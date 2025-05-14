@@ -42,7 +42,7 @@ import (
 // Download a supported C compiler targeting linux-arm64 so we can build a
 // statically compiled dolt binary. Return environment variables for
 // configuring CGO to compile with this compiler.
-func StageCompiler() ([]string, error) {
+func StageCompiler(targetArch string) ([]string, error) {
 	type location struct {
 		url string
 		sha string
@@ -52,7 +52,7 @@ func StageCompiler() ([]string, error) {
 			url: "https://dolthub-tools.s3.us-west-2.amazonaws.com/gcc/host=aarch64-darwin/target=linux-musl/20240515_0.0.2.tar.xz",
 			sha: "c3fe69b5f412c17f18efc8ddcdec4128f0103242c76b99adb3cdcf8a2c45ec89",
 		},
-		"darwin-amd64": {
+		"darwin-amd64": { // This is probably never used. Who has macOS x86_64 anymore?
 			url: "https://dolthub-tools.s3.us-west-2.amazonaws.com/gcc/host=x86_64-darwin/target=linux-musl/20240515_0.0.2.tar.xz",
 			sha: "f1eda39fa81a3eaab4f79f0f010a2d6bf0aea395e65b3a6e87541f55cf2ac853",
 		},
@@ -65,17 +65,25 @@ func StageCompiler() ([]string, error) {
 			sha: "befaa4d83d843b8a57ea0e6a16980ffa5b5ba575f4428adec1f7f5b1aa7671f1",
 		},
 	}
+
+	// Pull down the toolchain for the HOST platform, not the target platform.
 	plat := runtime.GOOS + "-" + runtime.GOARCH
 	loc, ok := urls[plat]
 	if !ok {
 		return nil, fmt.Errorf("unsupported runtime platform for lambda bats, %s; lambdabats needs to download a C toolchain targetting aarch64-linux-musl to run successfully", plat)
 	}
+
+	gnuArch := "x86_64"
+	if targetArch == "arm64" {
+		gnuArch = "aarch64"
+	}
+
 	dest := filepath.Join(os.TempDir(), loc.sha)
 	finalVars := []string{
 		"CGO_ENABLED=1",
 		fmt.Sprintf("PATH=%s/bin%c%s", dest, filepath.ListSeparator, os.Getenv("PATH")),
-		"CC=aarch64-linux-musl-gcc",
-		"AS=aarch64-linux-musl-as",
+		fmt.Sprintf("CC=%s-linux-musl-gcc", gnuArch),
+		fmt.Sprintf("AS=%s-linux-musl-as", gnuArch),
 		"CGO_LDFLAGS=-static -s",
 	}
 	_, err := os.Stat(dest)
@@ -123,14 +131,14 @@ func StageCompiler() ([]string, error) {
 	return finalVars, nil
 }
 
-func BuildTestsFile(doltSrcDir string) (UploadArtifacts, error) {
+func BuildTestsFile(doltSrcDir, arch string) (UploadArtifacts, error) {
 	binDir := filepath.Join(os.TempDir(), uuid.New().String())
 	defer os.RemoveAll(binDir)
 
 	doltBinFilePath := filepath.Join(binDir, "dolt")
-	compileEnv := append(os.Environ(), "GOOS=linux", "GOARCH=arm64")
+	compileEnv := append(os.Environ(), "GOOS=linux", "GOARCH="+arch)
 	err := RunWithSpinner("downloading toolchain...", func() error {
-		vars, err := StageCompiler()
+		vars, err := StageCompiler(arch)
 		if err != nil {
 			return fmt.Errorf("unable to stage compiler toolchain: %w", err)
 		}
@@ -364,23 +372,34 @@ func WriteFileToTar(w *tar.Writer, header *tar.Header, path string) error {
 	return err
 }
 
-func UploadTests(ctx context.Context, uploader Uploader, doltSrcDir string) (UploadLocations, error) {
-	artifacts, err := BuildTestsFile(doltSrcDir)
+func UploadTests(ctx context.Context, uploader Uploader, doltSrcDir, arch string, buildOnly bool) (UploadLocations, error) {
+	artifacts, err := BuildTestsFile(doltSrcDir, arch)
 	if err != nil {
 		return UploadLocations{}, err
 	}
+	ans := UploadLocations{
+		DoltPath:  filepath.Base(strings.TrimSuffix(artifacts.DoltTarPath, ".tar")),
+		BinPath:   filepath.Base(strings.TrimSuffix(artifacts.BinTarPath, ".tar")),
+		TestsPath: filepath.Base(strings.TrimSuffix(artifacts.TestsTarPath, ".tar")),
+	}
+
+	if buildOnly {
+		fmt.Println(fmt.Sprintf("Dolt Binary: %s", artifacts.DoltTarPath))
+		fmt.Println(fmt.Sprintf("RemoteSrv Binary: %s", artifacts.BinTarPath))
+		fmt.Println(fmt.Sprintf("Test Artifacts: %s", artifacts.TestsTarPath))
+		return ans, nil
+	}
+
 	defer os.RemoveAll(artifacts.DoltTarPath)
 	defer os.RemoveAll(artifacts.BinTarPath)
 	defer os.RemoveAll(artifacts.TestsTarPath)
+
 	err = uploader.Upload(ctx, artifacts)
 	if err != nil {
 		return UploadLocations{}, err
 	}
-	return UploadLocations{
-		DoltPath:  filepath.Base(strings.TrimSuffix(artifacts.DoltTarPath, ".tar")),
-		BinPath:   filepath.Base(strings.TrimSuffix(artifacts.BinTarPath, ".tar")),
-		TestsPath: filepath.Base(strings.TrimSuffix(artifacts.TestsTarPath, ".tar")),
-	}, nil
+
+	return ans, nil
 }
 
 type Uploader interface {
@@ -421,7 +440,7 @@ type S3Uploader struct {
 	bucket   string
 }
 
-func NewS3Uploader(ctx context.Context, cfg aws.Config, bucket string) (*S3Uploader, error) {
+func NewS3Uploader(_ context.Context, cfg aws.Config, bucket string) (*S3Uploader, error) {
 	return &S3Uploader{
 		s3client: s3.NewFromConfig(cfg),
 		bucket:   bucket,

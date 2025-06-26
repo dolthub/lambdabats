@@ -44,7 +44,7 @@ var EnvVars []string
 
 func PrintUsage() {
 	fmt.Println("usage: lambda-bats [-F pretty|tap] [-s lambda|lambda_skip|lambda_emulator] BATS_DIR_OR_FILES...")
-	fmt.Println("usage: lambda-bats login - SSO login to AWS as a developer. Must have AWS CLI installed.")
+	fmt.Println("usage: lambda-bats login [--headless] - SSO login to AWS as a developer. Must have AWS CLI installed.")
 	os.Exit(1)
 }
 
@@ -84,7 +84,14 @@ func GetDoltSrcDir(args []string) (string, error) {
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "login" {
-		os.Exit(DoLogin())
+		var useDeviceCode bool
+		loginArgs := os.Args[2:]
+		for _, arg := range loginArgs {
+			if arg == "--headless" {
+				useDeviceCode = true
+			}
+		}
+		os.Exit(DoLogin(useDeviceCode))
 	}
 
 	flag.Func("env", "environment variable to set in the remote invocation; for example -env SQL_ENGINE=remote-engine", func(val string) error {
@@ -216,12 +223,16 @@ func main() {
 	os.Exit(res)
 }
 
-func DoLogin() int {
+func DoLogin(useDeviceCode bool) int {
 	err := WithAWSConfig(func(path string) error {
 		cmd := exec.Command("aws")
-		cmd.Args = []string{
+		args := []string{
 			"aws", "sso", "login", "--sso-session", "dolthub_sso_session",
 		}
+		if useDeviceCode {
+			args = append(args, "--use-device-code")
+		}
+		cmd.Args = args
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		cmd.Env = os.Environ()

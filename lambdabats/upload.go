@@ -102,7 +102,7 @@ func StageCompiler(targetArch string) ([]string, error) {
 	}
 	if resp.StatusCode != http.StatusOK {
 		resp.Body.Close()
-		return nil, fmt.Errorf("unexpected HTTP status for HTTP GET toolchain url: %s: %d", loc.url, resp.Status)
+		return nil, fmt.Errorf("unexpected HTTP status for HTTP GET toolchain url: %s: %d", loc.url, resp.StatusCode)
 	}
 	h := sha256.New()
 	w := io.MultiWriter(f, h)

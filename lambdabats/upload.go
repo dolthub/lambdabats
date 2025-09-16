@@ -49,20 +49,20 @@ func StageCompiler(targetArch string) ([]string, error) {
 	}
 	var urls = map[string]location{
 		"darwin-arm64": {
-			url: "https://dolthub-tools.s3.us-west-2.amazonaws.com/gcc/host=aarch64-darwin/target=linux-musl/20240515_0.0.2.tar.xz",
-			sha: "c3fe69b5f412c17f18efc8ddcdec4128f0103242c76b99adb3cdcf8a2c45ec89",
+			url: "https://dolthub-tools.s3.us-west-2.amazonaws.com/gcc/host=aarch64-darwin/target=linux-musl/20250327_0.0.3_icu.tar.xz",
+			sha: "54841bba7a6b1690798bd0fc608794965225f42b0aa24a9459c50583ac027673",
 		},
 		"darwin-amd64": { // This is probably never used. Who has macOS x86_64 anymore?
-			url: "https://dolthub-tools.s3.us-west-2.amazonaws.com/gcc/host=x86_64-darwin/target=linux-musl/20240515_0.0.2.tar.xz",
-			sha: "f1eda39fa81a3eaab4f79f0f010a2d6bf0aea395e65b3a6e87541f55cf2ac853",
+			url: "https://dolthub-tools.s3.us-west-2.amazonaws.com/gcc/host=x86_64-darwin/target=linux-musl/20250327_0.0.3_icu.tar.xz",
+			sha: "30b34456f5b36cba2970a8d17eeca1d7e1932666889648e3a5e7b9f5c0b38280",
 		},
 		"linux-arm64": {
-			url: "https://dolthub-tools.s3.us-west-2.amazonaws.com/gcc/host=aarch64-linux/target=linux-musl/20240515_0.0.2.tar.xz",
-			sha: "b603a5c636547e1cd0dc6cf1bba5a1f67aacb8dd21f1b12582786497311f1fa9",
+			url: "https://dolthub-tools.s3.us-west-2.amazonaws.com/gcc/host=aarch64-linux/target=linux-musl/20250327_0.0.3_icu.tar.xz",
+			sha: "2a8d2b103d08e64a1bc9892296970dfc0bbb10f19ac938f765b32f3d474aaaa1",
 		},
 		"linux-amd64": {
-			url: "https://dolthub-tools.s3.us-west-2.amazonaws.com/gcc/host=x86_64-linux/target=linux-musl/20240515_0.0.2.tar.xz",
-			sha: "befaa4d83d843b8a57ea0e6a16980ffa5b5ba575f4428adec1f7f5b1aa7671f1",
+			url: "https://dolthub-tools.s3.us-west-2.amazonaws.com/gcc/host=x86_64-linux/target=linux-musl/20250327_0.0.3_icu.tar.xz",
+			sha: "f9ad51b5358370712b7255632871193fb3749f647ae74cdf79754d5735c56abe",
 		},
 	}
 
@@ -83,6 +83,7 @@ func StageCompiler(targetArch string) ([]string, error) {
 		"CGO_ENABLED=1",
 		fmt.Sprintf("PATH=%s/bin%c%s", dest, filepath.ListSeparator, os.Getenv("PATH")),
 		fmt.Sprintf("CC=%s-linux-musl-gcc", gnuArch),
+		fmt.Sprintf("CXX=%s-linux-musl-g++", gnuArch),
 		fmt.Sprintf("AS=%s-linux-musl-as", gnuArch),
 		"CGO_LDFLAGS=-static -s",
 	}
@@ -151,7 +152,7 @@ func BuildTestsFile(doltSrcDir, arch string) (UploadArtifacts, error) {
 	err = RunWithSpinner("building dolt...", func() error {
 		compileDolt := exec.Command("go")
 		compileDolt.Args = []string{
-			"go", "build", "-ldflags=-linkmode external -s -w", "-o", doltBinFilePath, "./cmd/dolt",
+			"go", "build", "-ldflags=-linkmode external -s -w", "-tags", "icu_static", "-o", doltBinFilePath, "./cmd/dolt",
 		}
 		compileDolt.Dir = filepath.Join(doltSrcDir, "go")
 		compileDolt.Env = compileEnv

@@ -120,7 +120,7 @@ func main() {
 	}
 
 	if *TargetArch == "amd64" {
-		fmt.Println("Forcing --build-only because x86 is not supported")
+		fmt.Println("Forcing --build-only because run on x86_64 is not supported")
 		*BuildOnly = true
 	}
 

@@ -83,6 +83,7 @@ func StageCompiler(targetArch string) ([]string, error) {
 		"CGO_ENABLED=1",
 		fmt.Sprintf("PATH=%s/bin%c%s", dest, filepath.ListSeparator, os.Getenv("PATH")),
 		fmt.Sprintf("CC=%s-linux-musl-gcc", gnuArch),
+		fmt.Sprintf("CXX=%s-linux-musl-g++", gnuArch),
 		fmt.Sprintf("AS=%s-linux-musl-as", gnuArch),
 		"CGO_LDFLAGS=-static -s",
 	}
@@ -151,7 +152,7 @@ func BuildTestsFile(doltSrcDir, arch string) (UploadArtifacts, error) {
 	err = RunWithSpinner("building dolt...", func() error {
 		compileDolt := exec.Command("go")
 		compileDolt.Args = []string{
-			"go", "build", "-ldflags=-linkmode external -s -w", "-o", doltBinFilePath, "./cmd/dolt",
+			"go", "build", "-ldflags=-linkmode external -s -w", "-tags", "icu_static", "-o", doltBinFilePath, "./cmd/dolt",
 		}
 		compileDolt.Dir = filepath.Join(doltSrcDir, "go")
 		compileDolt.Env = compileEnv

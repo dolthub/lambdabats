@@ -132,7 +132,7 @@ func StageCompiler(targetArch string) ([]string, error) {
 	return finalVars, nil
 }
 
-func BuildTestsFile(doltSrcDir, arch string) (UploadArtifacts, error) {
+func BuildTestsFile(doltSrcDir, arch string, race bool) (UploadArtifacts, error) {
 	binDir := filepath.Join(os.TempDir(), uuid.New().String())
 	defer os.RemoveAll(binDir)
 
@@ -152,8 +152,16 @@ func BuildTestsFile(doltSrcDir, arch string) (UploadArtifacts, error) {
 	err = RunWithSpinner("building dolt...", func() error {
 		compileDolt := exec.Command("go")
 		compileDolt.Args = []string{
-			"go", "build", "-ldflags=-linkmode external -s -w", "-tags", "icu_static", "-o", doltBinFilePath, "./cmd/dolt",
+			"go", "build", "-ldflags=-linkmode external -s -w", "-tags", "icu_static",
 		}
+		if race {
+			compileDolt.Args = append(compileDolt.Args, []string{
+				"-race",
+			}...)
+		}
+		compileDolt.Args = append(compileDolt.Args, []string{
+			"-o", doltBinFilePath, "./cmd/dolt",
+		}...)
 		compileDolt.Dir = filepath.Join(doltSrcDir, "go")
 		compileDolt.Env = compileEnv
 
@@ -373,8 +381,8 @@ func WriteFileToTar(w *tar.Writer, header *tar.Header, path string) error {
 	return err
 }
 
-func UploadTests(ctx context.Context, uploader Uploader, doltSrcDir, arch string, buildOnly bool) (UploadLocations, error) {
-	artifacts, err := BuildTestsFile(doltSrcDir, arch)
+func UploadTests(ctx context.Context, uploader Uploader, doltSrcDir, arch string, buildOnly, race bool) (UploadLocations, error) {
+	artifacts, err := BuildTestsFile(doltSrcDir, arch, race)
 	if err != nil {
 		return UploadLocations{}, err
 	}

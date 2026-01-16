@@ -39,6 +39,9 @@ var ExecutionStrategy = flag.String("s", "lambda", "execution strategy;\n  lambd
 var EnvCreds = flag.Bool("use-aws-environment-credentials", false, "by default we use hard-coded credentials which work for DoltHub developers; this uses credentials from the environment instead.")
 var TargetArch = flag.String("arch", "arm64", "target architecture for the lambda function; either amd64 or arm64")
 var BuildOnly = flag.Bool("build-only", false, "Print the location of the test artifacts and exit without running the tests.")
+var Race = flag.Bool("race", false, "Build dolt in race mode so that tests will fail if data races are detected.")
+var RunAllCount = flag.Int("count", 1, "Run all the tests multiple times. Can help track down flakiness.")
+var DuplicateTestsCount = flag.Int("duplicate", 1, "Duplicate the tests in each test file this many times. Can help track down flakiness.")
 
 var EnvVars []string
 
@@ -158,7 +161,7 @@ func main() {
 		config = NewTestRunConfig()
 	}
 
-	testArtifacts, err := UploadTests(ctx, config.Uploader, doltSrcDir, *TargetArch, *BuildOnly)
+	testArtifacts, err := UploadTests(ctx, config.Uploader, doltSrcDir, *TargetArch, *BuildOnly, *Race)
 	if err != nil {
 		panic(err)
 	}
@@ -168,58 +171,64 @@ func main() {
 		os.Exit(0)
 	}
 
-	files, total, err := LoadTestFiles(fileArgs)
-	if err != nil {
-		panic(err)
-	}
+	var res int
+	for i := 0; i < *RunAllCount; i++ {
+		files, total, err := LoadTestFiles(fileArgs, *DuplicateTestsCount)
+		if err != nil {
+			panic(err)
+		}
 
-	eg, egCtx := errgroup.WithContext(ctx)
-	eg.SetLimit(config.Concurrency)
-	bar := progressbar.Default(int64(total), "running tests")
+		eg, egCtx := errgroup.WithContext(ctx)
+		eg.SetLimit(config.Concurrency)
+		bar := progressbar.Default(int64(total), "running tests")
 
-	RunTest := func(fi, ti int) {
-		eg.Go(func() error {
-			filter := EscapeNameForFilter(files[fi].Tests[ti].Name)
-			req := wire.RunTestRequest{
-				DoltLocation: testArtifacts.DoltPath,
-				BinLocation:  testArtifacts.BinPath,
-				BatsLocation: testArtifacts.TestsPath,
-				FileName:     files[fi].Name,
-				TestName:     files[fi].Tests[ti].Name,
-				TestFilter:   filter,
-				EnvVars:      EnvVars,
-			}
-			runner := config.Runner
-			if files[fi].Tests[ti].HasTag("no_lambda") {
-				runner = fallbackRunner
-			}
-			resp, err := runner.Run(egCtx, req)
-			if err != nil {
-				return err
-			}
-			bar.Add(1)
-			files[fi].Tests[ti].Runs = append(files[fi].Tests[ti].Runs, TestRun{
-				Response: resp,
+		RunTest := func(fi, ti int) {
+			eg.Go(func() error {
+				filter := EscapeNameForFilter(files[fi].Tests[ti].Name)
+				req := wire.RunTestRequest{
+					DoltLocation: testArtifacts.DoltPath,
+					BinLocation:  testArtifacts.BinPath,
+					BatsLocation: testArtifacts.TestsPath,
+					FileName:     files[fi].Name,
+					TestName:     files[fi].Tests[ti].Name,
+					TestFilter:   filter,
+					EnvVars:      EnvVars,
+				}
+				runner := config.Runner
+				if files[fi].Tests[ti].HasTag("no_lambda") {
+					runner = fallbackRunner
+				}
+				resp, err := runner.Run(egCtx, req)
+				if err != nil {
+					return err
+				}
+				bar.Add(1)
+				files[fi].Tests[ti].Runs = append(files[fi].Tests[ti].Runs, TestRun{
+					Response: resp,
+				})
+				return nil
 			})
-			return nil
-		})
-	}
+		}
 
-	// Run all the tests...
-	for fi := range files {
-		for ti := range files[fi].Tests {
-			RunTest(fi, ti)
+		// Run all the tests...
+		for fi := range files {
+			for ti := range files[fi].Tests {
+				RunTest(fi, ti)
+			}
+		}
+		err = eg.Wait()
+		if err != nil {
+			panic(err)
+		}
+		bar.Finish()
+		bar.Close()
+
+		// Print the results...
+		res = OutputResults(files)
+		if res != 0 {
+			os.Exit(res)
 		}
 	}
-	err = eg.Wait()
-	if err != nil {
-		panic(err)
-	}
-	bar.Finish()
-	bar.Close()
-
-	// Print the results...
-	res := OutputResults(files)
 	os.Exit(res)
 }
 

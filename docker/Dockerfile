@@ -11,7 +11,7 @@ ADD bats.spec /home/builder/rpmbuild/SPECS/bats.spec
 ADD build_bats.sh /
 RUN su -l builder -c /build_bats.sh
 
-FROM public.ecr.aws/lambda/provided:al2023.2025.07.28.10
+FROM public.ecr.aws/lambda/provided:al2023.2025.11.14.16
 
 RUN dnf -y install \
   tar \
@@ -33,6 +33,8 @@ ENV JAVA_HOME=/usr/lib/jvm/java-17-amazon-corretto.aarch64/
 RUN cd /opt && curl -OL https://downloads.apache.org/hadoop/common/hadoop-3.3.6/hadoop-3.3.6.tar.gz && tar zxf hadoop-3.3.6.tar.gz && rm -f hadoop-3.3.6.tar.gz
 ENV PATH=/opt/hadoop-3.3.6/bin:"$PATH"
 
+RUN curl -L https://github.com/krallin/tini/releases/download/v0.19.0/tini-arm64 -o /usr/local/bin/tini && chmod +x /usr/local/bin/tini
+
 RUN mkdir /opt/parquet-1.12.3 && cd /opt/parquet-1.12.3 && curl -OL https://repo1.maven.org/maven2/org/apache/parquet/parquet-cli/1.12.3/parquet-cli-1.12.3-runtime.jar
 ENV PARQUET_RUNTIME_JAR=/opt/parquet-1.12.3/parquet-cli-1.12.3-runtime.jar
 
@@ -44,4 +46,4 @@ RUN rpm -i /root/bats-1.10.0-1.amzn2023.0.0.aarch64.rpm && rpm -U /root/bash-5.2
 ADD server /
 ADD run.sh /
 
-ENTRYPOINT ["/run.sh"]
+ENTRYPOINT ["/usr/local/bin/tini", "/run.sh"]

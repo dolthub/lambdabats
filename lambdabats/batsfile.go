@@ -75,7 +75,7 @@ func (tr TestRun) Result(name string) (TestRunResult, error) {
 	// introducing terminal control sequences which make Dolt print in
 	// colors, erase previously printed characters, etc.
 
-	toparse := strings.ReplaceAll(tr.Response.Output, "&#27;", "&#xfffd;",)
+	toparse := strings.ReplaceAll(tr.Response.Output, "&#27;", "&#xfffd;")
 
 	type TestCase struct {
 		Name    string  `xml:"name,attr"`
@@ -135,7 +135,7 @@ func SkippedJUnitTestCaseOutput(filename, testname, reason string) string {
 }
 
 // Read the *.bats files in a directory and collect the tests found in them.
-func LoadTestFiles(args []string) ([]TestFile, int, error) {
+func LoadTestFiles(args []string, duplicateCnt int) ([]TestFile, int, error) {
 	numTests := 0
 	var files []TestFile
 
@@ -183,7 +183,7 @@ func LoadTestFiles(args []string) ([]TestFile, int, error) {
 
 	for i := range files {
 		var err error
-		files[i].Tests, err = LoadTests(fileSys, files[i])
+		files[i].Tests, err = LoadTests(fileSys, files[i], duplicateCnt)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -193,7 +193,7 @@ func LoadTestFiles(args []string) ([]TestFile, int, error) {
 	return files, numTests, nil
 }
 
-func LoadTests(fileSys fs.FS, tf TestFile) ([]Test, error) {
+func LoadTests(fileSys fs.FS, tf TestFile, duplicateCnt int) ([]Test, error) {
 	f, err := fileSys.Open(tf.Name)
 	if err != nil {
 		return nil, err
@@ -210,7 +210,9 @@ func LoadTests(fileSys fs.FS, tf TestFile) ([]Test, error) {
 		} else if strings.HasPrefix(line, "@test \"") {
 			line = strings.TrimPrefix(line, "@test \"")
 			line = strings.TrimRight(line, "\" {")
-			res = append(res, Test{Name: line, Tags: tags, File: tf})
+			for range duplicateCnt {
+				res = append(res, Test{Name: line, Tags: tags, File: tf})
+			}
 			tags = nil
 		}
 	}

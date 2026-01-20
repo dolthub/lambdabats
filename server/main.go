@@ -79,7 +79,23 @@ func handleRequest(ctx context.Context, request events.LambdaFunctionURLRequest)
 	batsTempDir := filepath.Join(os.TempDir(), "bats_test_tmpdir")
 	err = os.RemoveAll(batsTempDir)
 	if err != nil {
-		return events.LambdaFunctionURLResponse{}, err
+		exec.Command("chmod", "-R", "777", batsTempDir).CombinedOutput()
+		err = os.RemoveAll(batsTempDir)
+		if err != nil {
+			out, oerr := exec.Command("id").CombinedOutput()
+			if oerr == nil {
+				err = fmt.Errorf("id: %s, err: %w", out, err)
+			} else {
+				err = fmt.Errorf("id err: %w, err: %w", oerr, err)
+			}
+			out, lserr := exec.Command("ls", "-laRt", batsTempDir).CombinedOutput()
+			if oerr == nil {
+				err = fmt.Errorf("ls: %s, err: %w", out, err)
+			} else {
+				err = fmt.Errorf("ls err: %w, err: %w", lserr, err)
+			}
+			return events.LambdaFunctionURLResponse{}, err
+		}
 	}
 	err = os.MkdirAll(batsTempDir, 0777)
 	if err != nil {

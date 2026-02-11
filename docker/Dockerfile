@@ -14,15 +14,17 @@ RUN su -l builder -c /build_bats.sh
 FROM public.ecr.aws/lambda/provided:al2023.2025.11.14.16
 
 RUN dnf -y install \
-  tar \
+  binutils \
+  diffutils \
+  expect \
+  findutils \
+  git \
+  java-17-amazon-corretto-headless \
   nc \
   procps \
-  diffutils \
-  findutils \
-  expect \
   python3 \
-  binutils \
-  java-17-amazon-corretto-headless && \
+  tar \
+  && \
   pip install \
     mysql-connector-python \
     pyarrow \

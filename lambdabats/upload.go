@@ -197,40 +197,34 @@ func BuildTestsFile(doltSrcDir, arch string, race bool) (UploadArtifacts, error)
 	defer os.RemoveAll(batsTarFilePath)
 
 	err = RunWithSpinner("building bats.tar...", func() error {
-		f, err := os.Create(batsTarFilePath)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-		w := tar.NewWriter(f)
-		defer w.Close()
+		return writeTarFile(batsTarFilePath, func(w *tar.Writer) error {
+			dfs := os.DirFS(filepath.Join(doltSrcDir, "integration-tests"))
+			err := fs.WalkDir(dfs, "bats", func(path string, d fs.DirEntry, err error) error {
+				if err != nil {
+					return err
+				}
+				fi, err := d.Info()
+				if err != nil {
+					return err
+				}
+				if d.IsDir() {
+					return w.WriteHeader(&tar.Header{
+						Name: path + "/",
+						Mode: int64(fi.Mode()),
+					})
+				} else {
+					return WriteFileToTar(w, &tar.Header{
+						Name: path,
+						Mode: int64(fi.Mode()),
+					}, filepath.Join(filepath.Join(doltSrcDir, "integration-tests"), path))
 
-		dfs := os.DirFS(filepath.Join(doltSrcDir, "integration-tests"))
-		err = fs.WalkDir(dfs, "bats", func(path string, d fs.DirEntry, err error) error {
+				}
+			})
 			if err != nil {
-				return err
+				return fmt.Errorf("error taring up bats tests: %w", err)
 			}
-			fi, err := d.Info()
-			if err != nil {
-				return err
-			}
-			if d.IsDir() {
-				return w.WriteHeader(&tar.Header{
-					Name: path + "/",
-					Mode: int64(fi.Mode()),
-				})
-			} else {
-				return WriteFileToTar(w, &tar.Header{
-					Name: path,
-					Mode: int64(fi.Mode()),
-				}, filepath.Join(filepath.Join(doltSrcDir, "integration-tests"), path))
-
-			}
+			return nil
 		})
-		if err != nil {
-			return fmt.Errorf("error taring up bats tests: %w", err)
-		}
-		return nil
 	})
 	if err != nil {
 		return UploadArtifacts{}, err
@@ -249,30 +243,19 @@ func BuildTestsFile(doltSrcDir, arch string, race bool) (UploadArtifacts, error)
 	doltHashStr := base32.HexEncoding.EncodeToString(doltHash.Sum(nil))
 
 	doltTarPath := filepath.Join(os.TempDir(), doltHashStr+".tar")
-	err = func() error {
-		f, err := os.Create(doltTarPath)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-		w := tar.NewWriter(f)
-		defer w.Close()
-		err = w.WriteHeader(&tar.Header{
+	err = writeTarFile(doltTarPath, func(w *tar.Writer) error {
+		err := w.WriteHeader(&tar.Header{
 			Name: "bin/",
 			Mode: 0777,
 		})
 		if err != nil {
 			return err
 		}
-		err = WriteFileToTar(w, &tar.Header{
+		return WriteFileToTar(w, &tar.Header{
 			Name: "bin/dolt",
 			Mode: 0777,
 		}, doltBinFilePath)
-		if err != nil {
-			return err
-		}
-		return nil
-	}()
+	})
 	if err != nil {
 		return UploadArtifacts{}, err
 	}
@@ -290,30 +273,19 @@ func BuildTestsFile(doltSrcDir, arch string, race bool) (UploadArtifacts, error)
 	binHashStr := base32.HexEncoding.EncodeToString(binHash.Sum(nil))
 
 	binTarPath := filepath.Join(os.TempDir(), binHashStr+".tar")
-	err = func() error {
-		f, err := os.Create(binTarPath)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-		w := tar.NewWriter(f)
-		defer w.Close()
-		err = w.WriteHeader(&tar.Header{
+	err = writeTarFile(binTarPath, func(w *tar.Writer) error {
+		err := w.WriteHeader(&tar.Header{
 			Name: "bin/",
 			Mode: 0777,
 		})
 		if err != nil {
 			return err
 		}
-		err = WriteFileToTar(w, &tar.Header{
+		return WriteFileToTar(w, &tar.Header{
 			Name: "bin/remotesrv",
 			Mode: 0777,
 		}, remotesrvBinFilePath)
-		if err != nil {
-			return err
-		}
-		return nil
-	}()
+	})
 	if err != nil {
 		return UploadArtifacts{}, err
 	}
@@ -331,20 +303,10 @@ func BuildTestsFile(doltSrcDir, arch string, race bool) (UploadArtifacts, error)
 	batsHashStr := base32.HexEncoding.EncodeToString(batsHash.Sum(nil))
 
 	batsTarPath := filepath.Join(os.TempDir(), batsHashStr+".tar")
-	err = func() error {
-		f, err := os.Create(batsTarPath)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-		src, err := os.Open(batsTarFilePath)
-		if err != nil {
-			return err
-		}
-		defer src.Close()
-		_, err = io.Copy(f, src)
-		return err
-	}()
+	err = copyFile(batsTarPath, batsTarFilePath)
+	if err != nil {
+		return UploadArtifacts{}, err
+	}
 
 	return UploadArtifacts{
 		DoltTarPath:  doltTarPath,
@@ -363,6 +325,47 @@ type UploadLocations struct {
 	DoltPath  string
 	BinPath   string
 	TestsPath string
+}
+
+// writeTarFile creates the file at |path| and calls |fill| to write entries
+// to a tar.Writer over it. Errors from closing the tar.Writer, which writes
+// the archive trailer, and from closing the file are returned.
+func writeTarFile(path string, fill func(*tar.Writer) error) (err error) {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cerr := f.Close(); err == nil {
+			err = cerr
+		}
+	}()
+	w := tar.NewWriter(f)
+	if err := fill(w); err != nil {
+		return err
+	}
+	return w.Close()
+}
+
+// copyFile copies the contents of |srcPath| to a newly created file at
+// |destPath|, returning any error from closing the destination file.
+func copyFile(destPath, srcPath string) (err error) {
+	src, err := os.Open(srcPath)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+	dest, err := os.Create(destPath)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cerr := dest.Close(); err == nil {
+			err = cerr
+		}
+	}()
+	_, err = io.Copy(dest, src)
+	return err
 }
 
 func WriteFileToTar(w *tar.Writer, header *tar.Header, path string) error {
@@ -428,18 +431,7 @@ type CopyingUploader struct {
 func (c *CopyingUploader) Upload(ctx context.Context, artifacts UploadArtifacts) error {
 	for _, path := range []string{artifacts.DoltTarPath, artifacts.BinTarPath, artifacts.TestsTarPath} {
 		destPath := filepath.Join(c.dir, filepath.Base(path))
-		src, err := os.Open(path)
-		if err != nil {
-			return err
-		}
-		defer src.Close()
-		dest, err := os.Create(destPath)
-		if err != nil {
-			return err
-		}
-		defer dest.Close()
-		_, err = io.Copy(dest, src)
-		if err != nil {
+		if err := copyFile(destPath, path); err != nil {
 			return err
 		}
 	}

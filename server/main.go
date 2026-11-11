@@ -159,7 +159,7 @@ type S3Downloader struct {
 	bucket   string
 }
 
-func (d *S3Downloader) Download(ctx context.Context, dest, name string) error {
+func (d *S3Downloader) Download(ctx context.Context, dest, name string) (err error) {
 	key := aws.String(name)
 	bucket := aws.String(d.bucket)
 	resp, err := d.s3client.GetObject(ctx, &s3.GetObjectInput{
@@ -174,7 +174,11 @@ func (d *S3Downloader) Download(ctx context.Context, dest, name string) error {
 	if err != nil {
 		return err
 	}
-	defer destF.Close()
+	defer func() {
+		if cerr := destF.Close(); err == nil {
+			err = cerr
+		}
+	}()
 	_, err = io.Copy(destF, resp.Body)
 	return err
 }
@@ -182,7 +186,7 @@ func (d *S3Downloader) Download(ctx context.Context, dest, name string) error {
 type CopyingDownloader struct {
 }
 
-func (d *CopyingDownloader) Download(ctx context.Context, dest, name string) error {
+func (d *CopyingDownloader) Download(ctx context.Context, dest, name string) (err error) {
 	uploadPath := filepath.Join("/test_uploads", name+".tar")
 	src, err := os.Open(uploadPath)
 	if err != nil {
@@ -193,7 +197,11 @@ func (d *CopyingDownloader) Download(ctx context.Context, dest, name string) err
 	if err != nil {
 		return err
 	}
-	defer destF.Close()
+	defer func() {
+		if cerr := destF.Close(); err == nil {
+			err = cerr
+		}
+	}()
 	_, err = io.Copy(destF, src)
 	return err
 }

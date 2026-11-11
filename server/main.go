@@ -27,6 +27,7 @@ import (
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
 	"github.com/dolthub/lambdabats/wire"
@@ -143,33 +144,42 @@ type Downloader interface {
 	Download(ctx context.Context, dest, name string) error
 }
 
+// S3RetryMaxAttempts is the maximum number of attempts for each S3 request.
+// When many test runs start at once, every Lambda sandbox fetches the same
+// artifacts from S3 at about the same time, so allow for some throttling.
+const S3RetryMaxAttempts = 5
+
 func NewS3Downloader(ctx context.Context, bucket string) (*S3Downloader, error) {
-	cfg, err := config.LoadDefaultConfig(ctx)
+	cfg, err := config.LoadDefaultConfig(ctx, config.WithRetryMaxAttempts(S3RetryMaxAttempts))
 	if err != nil {
 		return nil, err
 	}
-	return &S3Downloader{
-		s3client: s3.NewFromConfig(cfg),
-		bucket:   bucket,
-	}, nil
+	return newS3Downloader(s3.NewFromConfig(cfg), bucket), nil
 }
 
+// S3Downloader downloads test artifacts from S3. It fetches each artifact as
+// several concurrent ranged GETs. If reading the body of one of them fails
+// partway through, which is often an "unexpected EOF" or a "connection reset
+// by peer", only that part is fetched again.
 type S3Downloader struct {
-	s3client *s3.Client
-	bucket   string
+	downloader *manager.Downloader
+	bucket     string
+}
+
+func newS3Downloader(client manager.DownloadAPIClient, bucket string, opts ...func(*manager.Downloader)) *S3Downloader {
+	opts = append([]func(*manager.Downloader){func(d *manager.Downloader) {
+		// Larger parts than the default 5MB keep the number of
+		// requests made for the dolt binary low.
+		d.PartSize = 16 * 1024 * 1024
+		d.PartBodyMaxRetries = 5
+	}}, opts...)
+	return &S3Downloader{
+		downloader: manager.NewDownloader(client, opts...),
+		bucket:     bucket,
+	}
 }
 
 func (d *S3Downloader) Download(ctx context.Context, dest, name string) (err error) {
-	key := aws.String(name)
-	bucket := aws.String(d.bucket)
-	resp, err := d.s3client.GetObject(ctx, &s3.GetObjectInput{
-		Key:    key,
-		Bucket: bucket,
-	})
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
 	destF, err := os.Create(dest)
 	if err != nil {
 		return err
@@ -179,7 +189,10 @@ func (d *S3Downloader) Download(ctx context.Context, dest, name string) (err err
 			err = cerr
 		}
 	}()
-	_, err = io.Copy(destF, resp.Body)
+	_, err = d.downloader.Download(ctx, destF, &s3.GetObjectInput{
+		Bucket: aws.String(d.bucket),
+		Key:    aws.String(name),
+	})
 	return err
 }
 
@@ -254,7 +267,7 @@ func DownloadAndUntar(ctx context.Context, downloader Downloader, dest, name str
 	tarDestPath := filepath.Join(dest, name+".tar")
 	err = downloader.Download(ctx, tarDestPath, name)
 	if err != nil {
-		return err
+		return fmt.Errorf("could not download %s: %w", name, err)
 	}
 
 	untar := exec.Command("tar")

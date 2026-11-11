@@ -49,20 +49,20 @@ func StageCompiler(targetArch string) ([]string, error) {
 	}
 	var urls = map[string]location{
 		"darwin-arm64": {
-			url: "https://dolthub-tools.s3.us-west-2.amazonaws.com/gcc/host=aarch64-darwin/target=linux-musl/20260225_0.0.4_icu.tar.xz",
-			sha: "7e639212aeebc6b874c59811648dc546251ad65989c56c29737eebb6708cc4bf",
+			url: "https://dolthub-tools.s3.us-west-2.amazonaws.com/gcc/host=aarch64-darwin/target=linux-musl/20260611_0.0.5_icu.tar.xz",
+			sha: "3c9334c66824f68d77ae100d16f5b02031f421baefe633d3beab514e22a9866b",
 		},
 		"darwin-amd64": { // This is probably never used. Who has macOS x86_64 anymore?
-			url: "https://dolthub-tools.s3.us-west-2.amazonaws.com/gcc/host=x86_64-darwin/target=linux-musl/20260225_0.0.4_icu.tar.xz",
-			sha: "d2b9e4f4c1108fc11c56889b8b2e556b98ccfb88acdef8f06780e096f1fa7f07",
+			url: "https://dolthub-tools.s3.us-west-2.amazonaws.com/gcc/host=x86_64-darwin/target=linux-musl/20260611_0.0.5_icu.tar.xz",
+			sha: "d5357f6f2ced725c577dfc1f258a5b97e49355b0c4ece909c7109955bd1302bd",
 		},
 		"linux-arm64": {
-			url: "https://dolthub-tools.s3.us-west-2.amazonaws.com/gcc/host=aarch64-linux/target=linux-musl/20260225_0.0.4_icu.tar.xz",
-			sha: "3bdb170748f9b29dd6ffd25ac1e66fda41f1659568caab7247f330558824f060",
+			url: "https://dolthub-tools.s3.us-west-2.amazonaws.com/gcc/host=aarch64-linux/target=linux-musl/20260611_0.0.5_icu.tar.xz",
+			sha: "53dcc05f386ff5c1d1257bca3e3f7e86d2dbde21594683e30dfa2fca86930c47",
 		},
 		"linux-amd64": {
-			url: "https://dolthub-tools.s3.us-west-2.amazonaws.com/gcc/host=x86_64-linux/target=linux-musl/20260225_0.0.4_icu.tar.xz",
-			sha: "85e9687db2c1d2a1003ec3876c26bb1876463a85513b7dd22c15d84e8b88c091",
+			url: "https://dolthub-tools.s3.us-west-2.amazonaws.com/gcc/host=x86_64-linux/target=linux-musl/20260611_0.0.5_icu.tar.xz",
+			sha: "6b1f346e450f092b679260a07e998be744f276282d2f325a62d64f83e1bff017",
 		},
 	}
 

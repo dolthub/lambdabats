@@ -106,6 +106,14 @@ the `--env` flag.  For example, run `lambdabats --env SQL_ENGINE=remote-engine
 multiple environment variables this way. `HOME`, `PATH` and `TMPDIR` are not
 settable this way (at least for the the remote invocation).
 
+Sometimes the Lambda invocation for a test fails before or while running the
+test, for example because downloading the test artifacts from S3 fails with an
+`unexpected EOF` or a `connection reset by peer`, or because the invocation
+times out. `lambdabats` retries tests which fail this way, up to two times by
+default. You can change the number of retries with `-retries N`, and disable
+them with `-retries 0`. Tests which fail according to `bats` are never retried.
+Retried tests are listed in the output.
+
 Currently when `lambdabats` runs tests locally, it does nothing to administor
 the local environment in which the tests run. That means, it does not build
 `dolt` or `remotesrv` for the host platform and put them on the path, it does
@@ -134,5 +142,3 @@ Currently `lambdabats` does not attempt to do any of the following:
 1) Hedge a slow test run, in an attempt to get around a straggler.
 
 2) Rerun a failed test, in an attempt to detect flakiness vs. consistent brokeness.
-
-3) Detect certain Lambda function errors and automatically retry the test run, such as a timeout, instead of treating it as a test failure.

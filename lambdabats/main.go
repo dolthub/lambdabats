@@ -42,6 +42,7 @@ var BuildOnly = flag.Bool("build-only", false, "Print the location of the test a
 var Race = flag.Bool("race", false, "Build dolt in race mode so that tests will fail if data races are detected.")
 var RunAllCount = flag.Int("count", 1, "Run all the tests multiple times. Can help track down flakiness.")
 var DuplicateTestsCount = flag.Int("duplicate", 1, "Duplicate the tests in each test file this many times. Can help track down flakiness.")
+var Retries = flag.Int("retries", 2, "Retry a test this many times when its Lambda invocation fails with a transient error, such as a timeout or a failed artifact download. Test failures reported by bats are never retried.")
 
 var EnvVars []string
 
@@ -198,14 +199,12 @@ func main() {
 				if files[fi].Tests[ti].HasTag("no_lambda") {
 					runner = fallbackRunner
 				}
-				resp, err := runner.Run(egCtx, req)
+				runs, err := RunWithRetries(egCtx, runner, req, *Retries)
 				if err != nil {
 					return err
 				}
 				bar.Add(1)
-				files[fi].Tests[ti].Runs = append(files[fi].Tests[ti].Runs, TestRun{
-					Response: resp,
-				})
+				files[fi].Tests[ti].Runs = append(files[fi].Tests[ti].Runs, runs...)
 				return nil
 			})
 		}

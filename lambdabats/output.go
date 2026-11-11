@@ -88,7 +88,7 @@ type OutputResultsFunc = func(files []TestFile) int
 
 func allSuccess(test TestFile) bool {
 	for _, t := range test.Tests {
-		res, err := t.Runs[0].Result(t.Name)
+		res, err := t.FinalRun().Result(t.Name)
 		if err != nil {
 			return false
 		}
@@ -104,6 +104,7 @@ func OutputBatsResults(files []TestFile) int {
 	blue := color.New(color.FgBlue)
 	red := color.New(color.FgRed)
 	green := color.New(color.FgGreen)
+	yellow := color.New(color.FgYellow)
 
 	// Note this is log(n^2) thanks to running allSuccess repeatedly.
 	//TODO - precompute the stats of each file, and pretty print all the uninteresting things first.
@@ -132,14 +133,14 @@ func OutputBatsResults(files []TestFile) int {
 			blue.Println(f.Name)
 			for _, t := range f.Tests {
 				numTests += 1
-				res, err := t.Runs[0].Result(t.Name)
+				res, err := t.FinalRun().Result(t.Name)
 				if err != nil {
 					numFatal += 1
 					red.Printf("  ✗ %s\n", t.Name)
-					for _, line := range strings.Split(t.Runs[0].Response.Err, "\n") {
+					for _, line := range strings.Split(t.FinalRun().Response.Err, "\n") {
 						red.Printf("  %s\n", line)
 					}
-					for _, line := range strings.Split(t.Runs[0].Response.Output, "\n") {
+					for _, line := range strings.Split(t.FinalRun().Response.Output, "\n") {
 						red.Printf("  %s\n", line)
 					}
 					continue
@@ -164,12 +165,37 @@ func OutputBatsResults(files []TestFile) int {
 			fmt.Println()
 		}
 	}
+
+	numRetried := 0
+	for _, f := range files {
+		for _, t := range f.Tests {
+			if len(t.Runs) > 1 {
+				numRetried += 1
+			}
+		}
+	}
+	if numRetried > 0 {
+		yellow.Printf("%d tests retried after transient Lambda function errors:\n", numRetried)
+		for _, f := range files {
+			for _, t := range f.Tests {
+				for _, fnErr := range t.Retries() {
+					yellow.Printf("  %s: %s\n", t.Name, fnErr.Error())
+				}
+			}
+		}
+		fmt.Println()
+	}
+
+	retried := ""
+	if numRetried > 0 {
+		retried = fmt.Sprintf(", %d retried", numRetried)
+	}
 	if numFatal > 0 {
-		red.Printf("%d tests, %d fatal, %d failures, %d skipped\n", numTests, numFatal, numFailed, numSkipped)
+		red.Printf("%d tests, %d fatal, %d failures, %d skipped%s\n", numTests, numFatal, numFailed, numSkipped, retried)
 	} else if numFailed > 0 {
-		red.Printf("%d tests, %d failures, %d skipped\n", numTests, numFailed, numSkipped)
+		red.Printf("%d tests, %d failures, %d skipped%s\n", numTests, numFailed, numSkipped, retried)
 	} else {
-		fmt.Printf("%d tests, %d failures, %d skipped\n", numTests, numFailed, numSkipped)
+		fmt.Printf("%d tests, %d failures, %d skipped%s\n", numTests, numFailed, numSkipped, retried)
 	}
 
 	if numFailed == 0 && numFatal == 0 {
@@ -189,29 +215,36 @@ func OutputTAPResults(files []TestFile) int {
 	i := 1
 	for _, f := range files {
 		for _, t := range f.Tests {
-			res, err := t.Runs[0].Result(t.Name)
+			printRetries := func() {
+				for _, fnErr := range t.Retries() {
+					fmt.Printf("# retried after transient %s\n", fnErr.Error())
+				}
+			}
+			res, err := t.FinalRun().Result(t.Name)
 			if err != nil {
 				numFatal += 1
 				fmt.Printf("not ok %d %s\n", i, t.Name)
-				for _, line := range strings.Split(t.Runs[0].Response.Err, "\n") {
+				printRetries()
+				for _, line := range strings.Split(t.FinalRun().Response.Err, "\n") {
 					fmt.Printf("#%s\n", line)
 				}
-				for _, line := range strings.Split(t.Runs[0].Response.Output, "\n") {
+				for _, line := range strings.Split(t.FinalRun().Response.Output, "\n") {
 					fmt.Printf("#%s\n", line)
 				}
-				continue
-			}
-			if res.Status == TestRunResultStatus_Success {
+			} else if res.Status == TestRunResultStatus_Success {
 				fmt.Printf("ok %d %s\n", i, t.Name)
+				printRetries()
 			} else if res.Status == TestRunResultStatus_Skipped {
 				if res.Output == "" {
 					fmt.Printf("ok %d %s # skip\n", i, t.Name)
 				} else {
 					fmt.Printf("ok %d %s # skip %s\n", i, t.Name, res.Output)
 				}
+				printRetries()
 			} else {
 				numFailed += 1
 				fmt.Printf("not ok %d %s\n", i, t.Name)
+				printRetries()
 				for _, line := range strings.Split(res.Output, "\n") {
 					fmt.Printf("#%s\n", line)
 				}

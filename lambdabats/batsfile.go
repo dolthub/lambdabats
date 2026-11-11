@@ -48,8 +48,29 @@ func (t Test) HasTag(tag string) bool {
 	return false
 }
 
+// FinalRun returns the TestRun which is the result of the test. Earlier runs,
+// if any, are attempts which were retried after transient Lambda function
+// errors.
+func (t Test) FinalRun() TestRun {
+	return t.Runs[len(t.Runs)-1]
+}
+
+// Retries returns the Lambda function errors which caused this test to be
+// retried.
+func (t Test) Retries() []*LambdaFunctionError {
+	var res []*LambdaFunctionError
+	for _, r := range t.Runs[:len(t.Runs)-1] {
+		res = append(res, r.FunctionError)
+	}
+	return res
+}
+
 type TestRun struct {
 	Response wire.RunTestResult
+
+	// Set if this run's Lambda invocation failed instead of running the
+	// test. In that case, Response.Err describes the failure.
+	FunctionError *LambdaFunctionError
 }
 
 type TestRunResultStatus int

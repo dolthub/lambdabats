@@ -150,6 +150,12 @@ func (e *LambdaInvokeRunner) Run(ctx context.Context, req wire.RunTestRequest) (
 	if err != nil {
 		return res, err
 	}
+	if resp.FunctionError != nil {
+		if fnErr := ParseLambdaFunctionError(resp.Payload); fnErr != nil {
+			return res, fnErr
+		}
+		return res, &LambdaFunctionError{Type: *resp.FunctionError, Message: string(resp.Payload)}
+	}
 	return FromLambdaFunctionURLHTTPReResponseBytes(resp.Payload)
 }
 
@@ -166,8 +172,15 @@ func ToLambdaFunctionURLHTTPRequestBytes(req wire.RunTestRequest) ([]byte, error
 	return json.Marshal(lambdaReq)
 }
 
+// FromLambdaFunctionURLHTTPReResponseBytes parses a Lambda invocation
+// response payload. It returns a *LambdaFunctionError if the payload is from
+// a failed invocation. This is also how failed invocations are detected when
+// running against the Lambda emulator.
 func FromLambdaFunctionURLHTTPReResponseBytes(bs []byte) (wire.RunTestResult, error) {
 	var res wire.RunTestResult
+	if fnErr := ParseLambdaFunctionError(bs); fnErr != nil {
+		return res, fnErr
+	}
 	var lambdaResp events.LambdaFunctionURLResponse
 	err := json.Unmarshal(bs, &lambdaResp)
 	if err != nil {

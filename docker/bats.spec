@@ -1,8 +1,8 @@
 %define _trivial	.0
 %define _buildid	.0
 
-%define patchlevel 0
-%define baseversion 1.10
+%define patchlevel 1
+%define baseversion 1.11
 
 Version: %{baseversion}.%{patchlevel}
 Name: bats
@@ -43,5 +43,8 @@ cd bats-core-%{baseversion}.%{patchlevel}
 %{_mandir}/*/*
 
 %changelog
+* Wed Nov 11 2026 Aaron Son <aaron@dolthub.com> - 1.11.1-1.amzn2023.0.0
+- Update to 1.11.1, matching Dolt CI.
+
 * Tue Dec 5 2023 Aaron Son <aaron@dolthub.com> - 1.10.0-0.amzn2023.0.1
 - Initial build.

@@ -80,7 +80,6 @@ func RunWithSpinner(message string, work func() error) error {
 				fmt.Printf("\b%c", spinner[i])
 			}
 		}
-		return nil
 	})
 	return eg.Wait()
 }

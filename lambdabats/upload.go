@@ -261,6 +261,9 @@ func BuildTestsFile(doltSrcDir, arch string, race bool) (UploadArtifacts, error)
 			Name: "bin/",
 			Mode: 0777,
 		})
+		if err != nil {
+			return err
+		}
 		err = WriteFileToTar(w, &tar.Header{
 			Name: "bin/dolt",
 			Mode: 0777,
@@ -299,6 +302,9 @@ func BuildTestsFile(doltSrcDir, arch string, race bool) (UploadArtifacts, error)
 			Name: "bin/",
 			Mode: 0777,
 		})
+		if err != nil {
+			return err
+		}
 		err = WriteFileToTar(w, &tar.Header{
 			Name: "bin/remotesrv",
 			Mode: 0777,
@@ -393,9 +399,9 @@ func UploadTests(ctx context.Context, uploader Uploader, doltSrcDir, arch string
 	}
 
 	if buildOnly {
-		fmt.Println(fmt.Sprintf("Dolt Binary: %s", artifacts.DoltTarPath))
-		fmt.Println(fmt.Sprintf("RemoteSrv Binary: %s", artifacts.BinTarPath))
-		fmt.Println(fmt.Sprintf("Test Artifacts: %s", artifacts.TestsTarPath))
+		fmt.Printf("Dolt Binary: %s\n", artifacts.DoltTarPath)
+		fmt.Printf("RemoteSrv Binary: %s\n", artifacts.BinTarPath)
+		fmt.Printf("Test Artifacts: %s\n", artifacts.TestsTarPath)
 		return ans, nil
 	}
 
@@ -428,10 +434,10 @@ func (c *CopyingUploader) Upload(ctx context.Context, artifacts UploadArtifacts)
 		}
 		defer src.Close()
 		dest, err := os.Create(destPath)
-		defer dest.Close()
 		if err != nil {
 			return err
 		}
+		defer dest.Close()
 		_, err = io.Copy(dest, src)
 		if err != nil {
 			return err
